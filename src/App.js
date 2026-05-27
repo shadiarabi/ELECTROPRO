@@ -289,6 +289,12 @@ function PrintInvoice({ inv, locations, onClose }) {
                   <span>− {fmt(inv.discount_type === "pct" ? (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0) * inv.discount_value / 100 : inv.discount_value)}</span>
                 </div>
               )}
+              {inv.shipment_value > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#0066cc" }}>
+                  <span>🚢 Shipment {inv.shipment_type === "pct" ? `(${inv.shipment_value}%)` : ""}</span>
+                  <span>+ {fmt(inv.shipment_type === "pct" ? (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0) * inv.shipment_value / 100 : inv.shipment_value)}</span>
+                </div>
+              )}
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 16, fontWeight: 800, borderTop: "2px solid #000", marginTop: 8 }}>
                 <span>TOTAL</span><span>{fmt(total)}</span>
               </div>
@@ -518,12 +524,12 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
 }
 
 // ─── INVOICES ─────────────────────────────────────────────────────────────────
-function Invoices({ invoices, setInvoices, products, locations, onRefresh, userProfile }) {
+function Invoices({ invoices, setInvoices, products, locations, clients, suppliers, onRefresh, userProfile }) {
   const [typeFilter, setTypeFilter] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [printInv, setPrintInv] = useState(null);
-  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0 });
+  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0 });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
   const filtered = invoices.filter(i => typeFilter === "all" || i.type === typeFilter)
@@ -544,7 +550,8 @@ function Invoices({ invoices, setInvoices, products, locations, onRefresh, userP
 
   const subtotal = newInv.items.reduce((s, i) => s + i.qty * i.price, 0);
   const totalDiscount = newInv.discountType === "pct" ? subtotal * (+newInv.discountValue || 0) / 100 : (+newInv.discountValue || 0);
-  const grandTotal = Math.max(0, subtotal - totalDiscount);
+  const shipmentAmt = newInv.shipmentType === "pct" ? subtotal * (+newInv.shipmentValue || 0) / 100 : (+newInv.shipmentValue || 0);
+  const grandTotal = Math.max(0, subtotal - totalDiscount) + shipmentAmt;
 
   const saveInvoice = async () => {
     if (!newInv.customer || !newInv.location_id || newInv.items.length === 0) return;
@@ -553,7 +560,10 @@ function Invoices({ invoices, setInvoices, products, locations, onRefresh, userP
     const { error: invErr } = await supabase.from("invoices").insert({
       id: invId, type: newInv.type, date: newInv.date,
       location_id: +newInv.location_id, customer: newInv.customer, status: "paid",
-      discount_type: newInv.discountType, discount_value: +newInv.discountValue || 0
+      discount_type: newInv.discountType, discount_value: +newInv.discountValue || 0,
+      shipment_type: newInv.shipmentType, shipment_value: +newInv.shipmentValue || 0,
+      client_id: newInv.client_id ? +newInv.client_id : null,
+      supplier_id: newInv.supplier_id ? +newInv.supplier_id : null,
     });
     if (!invErr) {
       const items = newInv.items.map(i => ({ invoice_id: invId, product_id: i.productId, product_name: i.name, quantity: i.qty, price: i.price, original_price: i.originalPrice, discount_pct: i.discountPct, cost: i.cost }));
@@ -566,7 +576,7 @@ function Invoices({ invoices, setInvoices, products, locations, onRefresh, userP
         }
       }
       setShowCreate(false);
-      setNewInv({ type: "sell", location_id: "", customer: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0 });
+      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0 });
       onRefresh();
     }
     setSaving(false);
@@ -594,7 +604,7 @@ function Invoices({ invoices, setInvoices, products, locations, onRefresh, userP
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12, marginBottom: 16 }}>
             <div>
               <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>TYPE</div>
-              <select value={newInv.type} onChange={e => setNewInv({ ...newInv, type: e.target.value })}>
+              <select value={newInv.type} onChange={e => setNewInv({ ...newInv, type: e.target.value, client_id: "", supplier_id: "" })}>
                 <option value="sell">Sale Invoice</option>
                 <option value="buy">Purchase Invoice</option>
               </select>
@@ -607,8 +617,24 @@ function Invoices({ invoices, setInvoices, products, locations, onRefresh, userP
               </select>
             </div>
             <div>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{newInv.type === "sell" ? "CUSTOMER" : "SUPPLIER"}</div>
-              <input value={newInv.customer} onChange={e => setNewInv({ ...newInv, customer: e.target.value })} placeholder="Name" />
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{newInv.type === "sell" ? "CLIENT" : "SUPPLIER"}</div>
+              <select value={newInv.type === "sell" ? newInv.client_id : newInv.supplier_id} onChange={e => {
+                const id = e.target.value;
+                if (newInv.type === "sell") {
+                  const cl = clients.find(c => c.id === +id);
+                  setNewInv({ ...newInv, client_id: id, customer: cl ? cl.name : newInv.customer });
+                } else {
+                  const sp = suppliers.find(s => s.id === +id);
+                  setNewInv({ ...newInv, supplier_id: id, customer: sp ? sp.name : newInv.customer });
+                }
+              }}>
+                <option value="">Select or type name below...</option>
+                {newInv.type === "sell" ? clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>) : suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>OR TYPE NAME</div>
+              <input value={newInv.customer} onChange={e => setNewInv({ ...newInv, customer: e.target.value })} placeholder="Custom name" />
             </div>
             <div>
               <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DATE</div>
@@ -667,21 +693,49 @@ function Invoices({ invoices, setInvoices, products, locations, onRefresh, userP
             </div>
           )}
 
+          {/* Shipment fees */}
+          {newInv.items.length > 0 && (
+            <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: T.accent, fontWeight: 700, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>🚢 Shipment Fees</div>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <select value={newInv.shipmentType} onChange={e => setNewInv({ ...newInv, shipmentType: e.target.value })} style={{ width: "auto" }}>
+                  <option value="fixed">Fixed Amount ($)</option>
+                  <option value="pct">Percentage (% of subtotal)</option>
+                </select>
+                <input type="number" value={newInv.shipmentValue} onChange={e => setNewInv({ ...newInv, shipmentValue: e.target.value })} placeholder="0" style={{ width: 120 }} min="0" />
+                {shipmentAmt > 0 && <span style={{ fontFamily: T.mono, fontSize: 13, color: T.accent }}>+ {fmt(shipmentAmt)} shipment</span>}
+              </div>
+            </div>
+          )}
+
           {/* Total discount */}
           {newInv.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16 }}>
-              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Total Invoice Discount</div>
+              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>🏷️ Total Invoice Discount</div>
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <select value={newInv.discountType} onChange={e => setNewInv({ ...newInv, discountType: e.target.value })} style={{ width: "auto" }}>
                   <option value="fixed">Fixed Amount ($)</option>
                   <option value="pct">Percentage (%)</option>
                 </select>
                 <input type="number" value={newInv.discountValue} onChange={e => setNewInv({ ...newInv, discountValue: e.target.value })} placeholder="0" style={{ width: 120 }} min="0" />
-                <div style={{ fontFamily: T.mono, fontSize: 13 }}>
-                  <span style={{ color: T.muted }}>Subtotal: </span><span>{fmt(subtotal)}</span>
-                  {totalDiscount > 0 && <><span style={{ color: T.red, margin: "0 8px" }}>− {fmt(totalDiscount)}</span></>}
-                  <span style={{ color: T.accent, fontWeight: 800, marginLeft: 8 }}>= {fmt(grandTotal)}</span>
-                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Grand total summary */}
+          {newInv.items.length > 0 && (
+            <div style={{ background: T.accentDim, borderRadius: 10, padding: 16, marginBottom: 16, fontFamily: T.mono }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
+                <span style={{ color: T.muted }}>Subtotal</span><span>{fmt(subtotal)}</span>
+              </div>
+              {totalDiscount > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
+                <span style={{ color: T.red }}>Discount</span><span style={{ color: T.red }}>− {fmt(totalDiscount)}</span>
+              </div>}
+              {shipmentAmt > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
+                <span style={{ color: T.accent }}>🚢 Shipment</span><span style={{ color: T.accent }}>+ {fmt(shipmentAmt)}</span>
+              </div>}
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 800, borderTop: `1px solid ${T.border}`, paddingTop: 8, marginTop: 4 }}>
+                <span>GRAND TOTAL</span><span style={{ color: T.green }}>{fmt(grandTotal)}</span>
               </div>
             </div>
           )}
@@ -818,6 +872,174 @@ function ProfitLoss({ invoices, locations, userProfile }) {
             ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CLIENTS PAGE ─────────────────────────────────────────────────────────────
+function ClientsPage({ clients, onRefresh }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editClient, setEditClient] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: "", phone: "", email: "", address: "", notes: "" });
+
+  const save = async () => {
+    if (!form.name) return;
+    setSaving(true);
+    if (editClient) {
+      await supabase.from("clients").update(form).eq("id", editClient.id);
+      setEditClient(null);
+    } else {
+      await supabase.from("clients").insert(form);
+      setShowAdd(false);
+    }
+    setForm({ name: "", phone: "", email: "", address: "", notes: "" });
+    onRefresh();
+    setSaving(false);
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete this client?")) return;
+    await supabase.from("clients").delete().eq("id", id);
+    onRefresh();
+  };
+
+  const fields = [["name","Name *"],["phone","Phone"],["email","Email"],["address","Address"],["notes","Notes"]];
+
+  return (
+    <div className="page">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h2 style={{ fontSize: 28, fontWeight: 800 }}>Clients</h2>
+          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{clients.length} clients registered</p>
+        </div>
+        <Btn onClick={() => { setShowAdd(!showAdd); setEditClient(null); setForm({ name: "", phone: "", email: "", address: "", notes: "" }); }}>+ Add Client</Btn>
+      </div>
+
+      {(showAdd || editClient) && (
+        <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: T.accent }}>{editClient ? "✏️ Edit Client" : "New Client"}</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+            {fields.map(([k, lbl]) => (
+              <div key={k}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>{lbl}</div>
+                <input value={editClient ? editClient[k] || "" : form[k]} onChange={e => editClient ? setEditClient({ ...editClient, [k]: e.target.value }) : setForm({ ...form, [k]: e.target.value })} placeholder={lbl} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <Btn onClick={save} loading={saving}>Save</Btn>
+            <Btn outline onClick={() => { setShowAdd(false); setEditClient(null); }}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <table>
+          <thead><tr><th>Name</th><th>Phone</th><th className="hide-mobile">Email</th><th className="hide-mobile">Address</th><th>Actions</th></tr></thead>
+          <tbody>
+            {clients.map(c => (
+              <tr key={c.id}>
+                <td style={{ fontWeight: 600 }}>👤 {c.name}</td>
+                <td style={{ fontFamily: T.mono, fontSize: 12 }}>{c.phone || "—"}</td>
+                <td className="hide-mobile" style={{ fontSize: 12, color: T.muted }}>{c.email || "—"}</td>
+                <td className="hide-mobile" style={{ fontSize: 12, color: T.muted }}>{c.address || "—"}</td>
+                <td>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => { setEditClient(c); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                    <button onClick={() => del(c.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {clients.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: T.muted, padding: 32 }}>No clients yet. Add your first client!</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── SUPPLIERS PAGE ───────────────────────────────────────────────────────────
+function SuppliersPage({ suppliers, onRefresh }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editSupplier, setEditSupplier] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: "", phone: "", email: "", contact_person: "", address: "", notes: "" });
+
+  const save = async () => {
+    if (!form.name) return;
+    setSaving(true);
+    if (editSupplier) {
+      await supabase.from("suppliers").update(form).eq("id", editSupplier.id);
+      setEditSupplier(null);
+    } else {
+      await supabase.from("suppliers").insert(form);
+      setShowAdd(false);
+    }
+    setForm({ name: "", phone: "", email: "", contact_person: "", address: "", notes: "" });
+    onRefresh();
+    setSaving(false);
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete this supplier?")) return;
+    await supabase.from("suppliers").delete().eq("id", id);
+    onRefresh();
+  };
+
+  const fields = [["name","Name *"],["phone","Phone"],["email","Email"],["contact_person","Contact Person"],["address","Address"],["notes","Notes"]];
+
+  return (
+    <div className="page">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h2 style={{ fontSize: 28, fontWeight: 800 }}>Suppliers</h2>
+          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{suppliers.length} suppliers registered</p>
+        </div>
+        <Btn onClick={() => { setShowAdd(!showAdd); setEditSupplier(null); setForm({ name: "", phone: "", email: "", contact_person: "", address: "", notes: "" }); }}>+ Add Supplier</Btn>
+      </div>
+
+      {(showAdd || editSupplier) && (
+        <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: T.accent }}>{editSupplier ? "✏️ Edit Supplier" : "New Supplier"}</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+            {fields.map(([k, lbl]) => (
+              <div key={k}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>{lbl}</div>
+                <input value={editSupplier ? editSupplier[k] || "" : form[k]} onChange={e => editSupplier ? setEditSupplier({ ...editSupplier, [k]: e.target.value }) : setForm({ ...form, [k]: e.target.value })} placeholder={lbl} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <Btn onClick={save} loading={saving}>Save</Btn>
+            <Btn outline onClick={() => { setShowAdd(false); setEditSupplier(null); }}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <table>
+          <thead><tr><th>Name</th><th>Phone</th><th className="hide-mobile">Contact</th><th className="hide-mobile">Email</th><th>Actions</th></tr></thead>
+          <tbody>
+            {suppliers.map(s => (
+              <tr key={s.id}>
+                <td style={{ fontWeight: 600 }}>🏭 {s.name}</td>
+                <td style={{ fontFamily: T.mono, fontSize: 12 }}>{s.phone || "—"}</td>
+                <td className="hide-mobile" style={{ fontSize: 12 }}>{s.contact_person || "—"}</td>
+                <td className="hide-mobile" style={{ fontSize: 12, color: T.muted }}>{s.email || "—"}</td>
+                <td>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => { setEditSupplier(s); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                    <button onClick={() => del(s.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {suppliers.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: T.muted, padding: 32 }}>No suppliers yet. Add your first supplier!</td></tr>}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1230,6 +1452,8 @@ export default function App() {
   const [products, setProducts] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
 
   // Auth check
   useEffect(() => {
@@ -1259,6 +1483,8 @@ export default function App() {
     const { data: locs } = await supabase.from("locations").select("*").order("id");
     const { data: prods } = await supabase.from("products").select("*, stock(quantity, location_id)");
     const { data: invs } = await supabase.from("invoices").select("*, invoice_items(*), locations(name)").order("date", { ascending: false });
+    const { data: cls } = await supabase.from("clients").select("*").order("name");
+    const { data: sups } = await supabase.from("suppliers").select("*").order("name");
 
     const locsData = locs || [];
     const prodsData = (prods || []).map(p => {
@@ -1268,7 +1494,10 @@ export default function App() {
       return { ...p, stockByLocation, totalStock, stock: undefined };
     });
     const invsData = (invs || []).map(inv => {
-      const total = (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0);
+      const subtotal = (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0);
+      const discountAmt = inv.discount_type === "pct" ? subtotal * (inv.discount_value || 0) / 100 : (inv.discount_value || 0);
+      const shipAmt = inv.shipment_type === "pct" ? subtotal * (inv.shipment_value || 0) / 100 : (inv.shipment_value || 0);
+      const total = Math.max(0, subtotal - discountAmt) + shipAmt;
       const cogs = (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.cost, 0);
       const profit = inv.type === "sell" ? total - cogs : 0;
       return { ...inv, total, cogs, profit, locationName: inv.locations?.name || "", invoice_items: undefined, locations: undefined };
@@ -1281,6 +1510,8 @@ export default function App() {
     setLocations(locsWithRevenue);
     setProducts(prodsData);
     setInvoices(invsData);
+    setClients(cls || []);
+    setSuppliers(sups || []);
     setLoading(false);
   }, []);
 
@@ -1306,6 +1537,8 @@ export default function App() {
   const NAV = [
     { id: "dashboard", label: "Dashboard", icon: "⚡" },
     { id: "inventory", label: "Inventory", icon: "📦" },
+    { id: "clients", label: "Clients", icon: "👤" },
+    { id: "suppliers", label: "Suppliers", icon: "🏭" },
     { id: "orders", label: "Sales Orders", icon: "📋" },
     { id: "invoices", label: "Invoices", icon: "🧾" },
     ...(isManager ? [{ id: "pl", label: "P&L", icon: "📊" }] : []),
@@ -1343,8 +1576,10 @@ export default function App() {
             <>
               {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} />}
               {page === "inventory" && <Inventory products={products} locations={locations} onRefresh={loadData} userProfile={userProfile} />}
+              {page === "clients" && <ClientsPage clients={clients} onRefresh={loadData} />}
+              {page === "suppliers" && <SuppliersPage suppliers={suppliers} onRefresh={loadData} />}
               {page === "orders" && <SalesOrders products={products} locations={locations} invoices={invoices} setInvoices={setInvoices} onRefresh={loadData} />}
-              {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} onRefresh={loadData} userProfile={userProfile} />}
+              {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} clients={clients} suppliers={suppliers} onRefresh={loadData} userProfile={userProfile} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
               {page === "locations" && <LocationsPage products={products} invoices={invoices} locations={locations} />}
               {page === "manage-locations" && <LocationsManagement locations={locations} onRefresh={loadData} userProfile={userProfile} />}
