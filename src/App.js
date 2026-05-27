@@ -370,6 +370,7 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editProduct, setEditProduct] = useState(null);
   const [form, setForm] = useState({ name: "", sku: "", category: "", cost_price: "", sell_price: "" });
   const canEdit = ["admin", "manager"].includes(userProfile?.role);
 
@@ -394,6 +395,25 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
     setSaving(false);
   };
 
+  const saveEdit = async () => {
+    if (!editProduct) return;
+    setSaving(true);
+    await supabase.from("products").update({
+      name: editProduct.name, sku: editProduct.sku, category: editProduct.category,
+      cost_price: +editProduct.cost_price, sell_price: +editProduct.sell_price
+    }).eq("id", editProduct.id);
+    setEditProduct(null);
+    onRefresh();
+    setSaving(false);
+  };
+
+  const deleteProduct = async (id) => {
+    if (!window.confirm("Delete this product? This cannot be undone.")) return;
+    await supabase.from("stock").delete().eq("product_id", id);
+    await supabase.from("products").delete().eq("id", id);
+    onRefresh();
+  };
+
   return (
     <div className="page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
@@ -403,6 +423,28 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
         </div>
         {canEdit && <Btn onClick={() => setShowAdd(!showAdd)}>+ Add Product</Btn>}
       </div>
+
+      {/* Edit Modal */}
+      {editProduct && (
+        <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 500 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, color: T.accent }}>✏️ Edit Product</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {[["name","Product Name"],["sku","SKU"],["category","Category"],["cost_price","Cost Price ($)"],["sell_price","Sell Price ($)"]].map(([k,lbl]) => (
+                <div key={k} style={{ gridColumn: k === "name" ? "1/-1" : "auto" }}>
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>{lbl}</div>
+                  <input value={editProduct[k] || ""} onChange={e => setEditProduct({...editProduct,[k]:e.target.value})} placeholder={lbl} />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <Btn onClick={saveEdit} loading={saving}>Save Changes</Btn>
+              <Btn outline onClick={() => setEditProduct(null)}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAdd && canEdit && (
         <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 24, marginBottom: 24 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: T.accent }}>New Product</h3>
@@ -429,7 +471,7 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
                 <th>Product</th><th>SKU</th><th className="hide-mobile">Category</th>
                 <th className="hide-mobile">Cost</th><th>Sell</th><th className="hide-mobile">Margin</th>
                 {locations.map(l => <th key={l.id} className="hide-mobile">{l.name.split(" ")[0]}</th>)}
-                <th>Total</th>
+                <th>Total</th>{canEdit && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -448,6 +490,12 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
                       return <td key={l.id} className="hide-mobile" style={{ textAlign: "center", fontFamily: T.mono, color: s < 3 ? T.red : s < 8 ? T.yellow : T.text }}>{s}</td>;
                     })}
                     <td style={{ fontWeight: 700, fontFamily: T.mono, color: T.accent }}>{p.totalStock || 0}</td>
+                    {canEdit && <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setEditProduct(p)} style={{ background: T.accent + "22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                        <button onClick={() => deleteProduct(p.id)} style={{ background: T.red + "22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                      </div>
+                    </td>}
                   </tr>
                 );
               })}
@@ -600,7 +648,7 @@ function Invoices({ invoices, setInvoices, products, locations, onRefresh, userP
       <div style={{ overflowX: "auto" }}>
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", minWidth: 600 }}>
           <table>
-            <thead><tr><th>Invoice</th><th>Type</th><th className="hide-mobile">Date</th><th className="hide-mobile">Location</th><th>Customer</th><th>Total</th><th className="hide-mobile">Status</th><th>Print</th></tr></thead>
+            <thead><tr><th>Invoice</th><th>Type</th><th className="hide-mobile">Date</th><th className="hide-mobile">Location</th><th>Customer</th><th>Total</th><th className="hide-mobile">Status</th><th>Print</th><th>Del</th></tr></thead>
             <tbody>
               {filtered.map(inv => (
                 <tr key={inv.id}>
@@ -612,6 +660,7 @@ function Invoices({ invoices, setInvoices, products, locations, onRefresh, userP
                   <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
                   <td className="hide-mobile"><Badge color={inv.status === "paid" ? T.green : T.yellow}>{inv.status?.toUpperCase()}</Badge></td>
                   <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
+                  <td><button onClick={async () => { if(window.confirm("Delete this invoice?")) { await supabase.from("invoice_items").delete().eq("invoice_id", inv.id); await supabase.from("invoices").delete().eq("id", inv.id); onRefresh(); }}} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 10px", color: T.red, fontSize: 12, cursor: "pointer" }}>🗑️</button></td>
                 </tr>
               ))}
             </tbody>
@@ -961,6 +1010,97 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
   );
 }
 
+// ─── LOCATIONS MANAGEMENT ────────────────────────────────────────────────────
+function LocationsManagement({ locations, onRefresh, userProfile }) {
+  const [saving, setSaving] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [editLoc, setEditLoc] = useState(null);
+  const canEdit = ["admin"].includes(userProfile?.role);
+
+  const addLocation = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    await supabase.from("locations").insert({ name: newName.trim() });
+    setNewName("");
+    onRefresh();
+    setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editLoc?.name.trim()) return;
+    setSaving(true);
+    await supabase.from("locations").update({ name: editLoc.name }).eq("id", editLoc.id);
+    setEditLoc(null);
+    onRefresh();
+    setSaving(false);
+  };
+
+  const deleteLocation = async (id) => {
+    if (!window.confirm("Delete this location? Stock data for this location will also be removed.")) return;
+    await supabase.from("stock").delete().eq("location_id", id);
+    await supabase.from("locations").delete().eq("id", id);
+    onRefresh();
+  };
+
+  return (
+    <div className="page">
+      <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6 }}>Manage Locations</h2>
+      <p style={{ color: T.muted, fontSize: 13, marginBottom: 24 }}>Add, edit or remove your business locations</p>
+
+      {/* Edit Modal */}
+      {editLoc && (
+        <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 400 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, color: T.accent }}>✏️ Edit Location</h3>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 6, textTransform: "uppercase" }}>Location Name</div>
+            <input value={editLoc.name} onChange={e => setEditLoc({...editLoc, name: e.target.value})} style={{ marginBottom: 20 }} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <Btn onClick={saveEdit} loading={saving}>Save</Btn>
+              <Btn outline onClick={() => setEditLoc(null)}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add new location */}
+      {canEdit && (
+        <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: T.accent }}>+ Add New Location</h3>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Location Name</div>
+              <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Branch D - North" onKeyDown={e => e.key === "Enter" && addLocation()} />
+            </div>
+            <Btn onClick={addLocation} loading={saving} disabled={!newName.trim()}>Add Location</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* Locations list */}
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <table>
+          <thead><tr><th>#</th><th>Location Name</th><th>Created</th>{canEdit && <th>Actions</th>}</tr></thead>
+          <tbody>
+            {locations.map(l => (
+              <tr key={l.id}>
+                <td style={{ fontFamily: T.mono, color: T.muted, fontSize: 12 }}>{l.id}</td>
+                <td style={{ fontWeight: 600, fontSize: 15 }}>🏢 {l.name}</td>
+                <td style={{ color: T.muted, fontSize: 12 }}>{l.created_at ? new Date(l.created_at).toLocaleDateString() : "—"}</td>
+                {canEdit && <td>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => setEditLoc(l)} style={{ background: T.accent + "22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 10px", color: T.accent, fontSize: 12, cursor: "pointer" }}>✏️ Edit</button>
+                    <button onClick={() => deleteLocation(l.id)} style={{ background: T.red + "22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 10px", color: T.red, fontSize: 12, cursor: "pointer" }}>🗑️ Delete</button>
+                  </div>
+                </td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── LOCATIONS PAGE ───────────────────────────────────────────────────────────
 function LocationsPage({ products, invoices, locations }) {
   const [selected, setSelected] = useState(null);
@@ -1114,6 +1254,7 @@ export default function App() {
     { id: "invoices", label: "Invoices", icon: "🧾" },
     ...(isManager ? [{ id: "pl", label: "P&L", icon: "📊" }] : []),
     { id: "locations", label: "Locations", icon: "🏢" },
+    ...(isAdmin ? [{ id: "manage-locations", label: "Manage Locations", icon: "📍" }] : []),
     ...(isAdmin ? [{ id: "users", label: "Users", icon: "👥" }] : []),
   ];
 
@@ -1150,6 +1291,7 @@ export default function App() {
               {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
               {page === "locations" && <LocationsPage products={products} invoices={invoices} locations={locations} />}
+              {page === "manage-locations" && <LocationsManagement locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "users" && <UsersPage currentUser={userProfile} />}
             </>
           )}
