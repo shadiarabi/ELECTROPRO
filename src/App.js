@@ -718,6 +718,249 @@ function ProfitLoss({ invoices, locations, userProfile }) {
   );
 }
 
+// ─── SALES ORDERS ────────────────────────────────────────────────────────────
+function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [converting, setConverting] = useState(null);
+  const [newOrder, setNewOrder] = useState({ location_id: "", customer: "", date: new Date().toISOString().slice(0, 10), notes: "", items: [] });
+  const [itemForm, setItemForm] = useState({ productId: "", qty: 1 });
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("sales_orders").select("*, sales_order_items(*), locations(name)").order("created_at", { ascending: false });
+    setOrders((data || []).map(o => ({
+      ...o,
+      locationName: o.locations?.name || "",
+      total: (o.sales_order_items || []).reduce((s, i) => s + i.quantity * i.price, 0),
+      items: o.sales_order_items || [],
+    })));
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  const addItem = () => {
+    const prod = products.find(p => p.id === +itemForm.productId);
+    if (!prod) return;
+    setNewOrder({ ...newOrder, items: [...newOrder.items, { productId: prod.id, name: prod.name, qty: +itemForm.qty, price: prod.sell_price, cost: prod.cost_price }] });
+    setItemForm({ productId: "", qty: 1 });
+  };
+
+  const saveOrder = async () => {
+    if (!newOrder.customer || !newOrder.location_id || newOrder.items.length === 0) return;
+    setSaving(true);
+    const orderId = "ORD-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+    const { error } = await supabase.from("sales_orders").insert({
+      id: orderId, date: newOrder.date, location_id: +newOrder.location_id,
+      customer: newOrder.customer, status: "draft", notes: newOrder.notes
+    });
+    if (!error) {
+      await supabase.from("sales_order_items").insert(
+        newOrder.items.map(i => ({ order_id: orderId, product_id: i.productId, product_name: i.name, quantity: i.qty, price: i.price, cost: i.cost }))
+      );
+      setShowCreate(false);
+      setNewOrder({ location_id: "", customer: "", date: new Date().toISOString().slice(0, 10), notes: "", items: [] });
+      loadOrders();
+    }
+    setSaving(false);
+  };
+
+  const updateStatus = async (id, status) => {
+    await supabase.from("sales_orders").update({ status }).eq("id", id);
+    loadOrders();
+  };
+
+  const convertToInvoice = async (order) => {
+    setConverting(order.id);
+    const invId = "INV-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+    const { error } = await supabase.from("invoices").insert({
+      id: invId, type: "sell", date: order.date,
+      location_id: order.location_id, customer: order.customer, status: "paid"
+    });
+    if (!error) {
+      await supabase.from("invoice_items").insert(
+        order.items.map(i => ({ invoice_id: invId, product_id: i.product_id, product_name: i.product_name, quantity: i.quantity, price: i.price, cost: i.cost }))
+      );
+      // Deduct stock
+      for (const item of order.items) {
+        const { data: stockRow } = await supabase.from("stock").select("quantity").eq("product_id", item.product_id).eq("location_id", order.location_id).single();
+        if (stockRow) {
+          await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity - item.quantity) }).eq("product_id", item.product_id).eq("location_id", order.location_id);
+        }
+      }
+      await supabase.from("sales_orders").update({ status: "invoiced" }).eq("id", order.id);
+      loadOrders();
+      onRefresh();
+    }
+    setConverting(null);
+  };
+
+  const statusColor = { draft: T.muted, confirmed: T.yellow, invoiced: T.green, cancelled: T.red };
+
+  return (
+    <div className="page">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h2 style={{ fontSize: 28, fontWeight: 800 }}>Sales Orders</h2>
+          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>Create orders before finalizing invoices</p>
+        </div>
+        <Btn onClick={() => setShowCreate(!showCreate)}>+ New Order</Btn>
+      </div>
+
+      {/* How it works */}
+      <div style={{ background: T.card, border: `1px solid ${T.accent}33`, borderRadius: 12, padding: 16, marginBottom: 24, display: "flex", gap: 20, flexWrap: "wrap" }}>
+        {[
+          { step: "1", label: "Create Order", desc: "Draft — no stock deducted", color: T.muted },
+          { step: "2", label: "Confirm Order", desc: "Customer confirmed", color: T.yellow },
+          { step: "3", label: "Convert to Invoice", desc: "Stock deducted automatically", color: T.green },
+        ].map(s => (
+          <div key={s.step} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", background: s.color + "22", border: `1px solid ${s.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: s.color }}>{s.step}</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: s.color }}>{s.label}</div>
+              <div style={{ fontSize: 11, color: T.muted }}>{s.desc}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showCreate && (
+        <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: T.accent }}>New Sales Order</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12, marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>LOCATION</div>
+              <select value={newOrder.location_id} onChange={e => setNewOrder({ ...newOrder, location_id: e.target.value })}>
+                <option value="">Select location...</option>
+                {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>CUSTOMER</div>
+              <input value={newOrder.customer} onChange={e => setNewOrder({ ...newOrder, customer: e.target.value })} placeholder="Customer name" />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DATE</div>
+              <input type="date" value={newOrder.date} onChange={e => setNewOrder({ ...newOrder, date: e.target.value })} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>NOTES</div>
+              <input value={newOrder.notes} onChange={e => setNewOrder({ ...newOrder, notes: e.target.value })} placeholder="Optional notes" />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ flex: 2, minWidth: 160 }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRODUCT</div>
+              <select value={itemForm.productId} onChange={e => setItemForm({ ...itemForm, productId: e.target.value })}>
+                <option value="">Select product...</option>
+                {products.map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.sell_price)}</option>)}
+              </select>
+            </div>
+            <div style={{ width: 80 }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>QTY</div>
+              <input type="number" value={itemForm.qty} onChange={e => setItemForm({ ...itemForm, qty: e.target.value })} min="1" />
+            </div>
+            <Btn small onClick={addItem} disabled={!itemForm.productId}>Add</Btn>
+          </div>
+          {newOrder.items.length > 0 && (
+            <div style={{ background: T.surface, borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
+              <table>
+                <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
+                <tbody>
+                  {newOrder.items.map((item, i) => (
+                    <tr key={i}>
+                      <td>{item.name}</td>
+                      <td style={{ fontFamily: T.mono }}>{item.qty}</td>
+                      <td style={{ fontFamily: T.mono }}>{fmt(item.price)}</td>
+                      <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(item.qty * item.price)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={3} style={{ textAlign: "right", fontWeight: 700 }}>Total</td>
+                    <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.accent }}>{fmt(newOrder.items.reduce((s, i) => s + i.qty * i.price, 0))}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Btn onClick={saveOrder} loading={saving} disabled={!newOrder.customer || !newOrder.location_id || newOrder.items.length === 0}>Save Order</Btn>
+            <Btn outline onClick={() => setShowCreate(false)}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+
+      {loading ? <Loader /> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {orders.length === 0 && (
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 40, textAlign: "center", color: T.muted }}>
+              No sales orders yet. Create your first one!
+            </div>
+          )}
+          {orders.map(order => (
+            <div key={order.id} style={{ background: T.card, border: `1px solid ${order.status === "confirmed" ? T.yellow + "44" : T.border}`, borderRadius: 12, padding: 20 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: T.mono, color: T.accent, fontSize: 13 }}>{order.id}</span>
+                    <Badge color={statusColor[order.status]}>{order.status.toUpperCase()}</Badge>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 700 }}>{order.customer}</div>
+                  <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{order.locationName} · {order.date}</div>
+                  {order.notes && <div style={{ fontSize: 12, color: T.muted, marginTop: 4, fontStyle: "italic" }}>{order.notes}</div>}
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: T.accent, fontFamily: T.mono }}>{fmt(order.total)}</div>
+                  <div style={{ fontSize: 12, color: T.muted }}>{order.items.length} items</div>
+                </div>
+              </div>
+
+              {/* Items */}
+              <div style={{ background: T.surface, borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
+                <table>
+                  <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
+                  <tbody>
+                    {order.items.map((item, i) => (
+                      <tr key={i}>
+                        <td style={{ fontSize: 13 }}>{item.product_name}</td>
+                        <td style={{ fontFamily: T.mono }}>{item.quantity}</td>
+                        <td style={{ fontFamily: T.mono }}>{fmt(item.price)}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(item.quantity * item.price)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {order.status === "draft" && (
+                  <Btn small onClick={() => updateStatus(order.id, "confirmed")} color={T.yellow}>✓ Confirm Order</Btn>
+                )}
+                {order.status === "confirmed" && (
+                  <Btn small onClick={() => convertToInvoice(order)} loading={converting === order.id} color={T.green}>⚡ Convert to Invoice</Btn>
+                )}
+                {order.status === "draft" && (
+                  <Btn small outline onClick={() => updateStatus(order.id, "cancelled")} color={T.red}>✕ Cancel</Btn>
+                )}
+                {order.status === "invoiced" && (
+                  <span style={{ fontSize: 12, color: T.green, fontFamily: T.mono }}>✓ Invoice created successfully</span>
+                )}
+                {order.status === "cancelled" && (
+                  <span style={{ fontSize: 12, color: T.red, fontFamily: T.mono }}>✕ Order cancelled</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── LOCATIONS PAGE ───────────────────────────────────────────────────────────
 function LocationsPage({ products, invoices, locations }) {
   const [selected, setSelected] = useState(null);
@@ -867,6 +1110,7 @@ export default function App() {
   const NAV = [
     { id: "dashboard", label: "Dashboard", icon: "⚡" },
     { id: "inventory", label: "Inventory", icon: "📦" },
+    { id: "orders", label: "Sales Orders", icon: "📋" },
     { id: "invoices", label: "Invoices", icon: "🧾" },
     ...(isManager ? [{ id: "pl", label: "P&L", icon: "📊" }] : []),
     { id: "locations", label: "Locations", icon: "🏢" },
@@ -902,6 +1146,7 @@ export default function App() {
             <>
               {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} />}
               {page === "inventory" && <Inventory products={products} locations={locations} onRefresh={loadData} userProfile={userProfile} />}
+              {page === "orders" && <SalesOrders products={products} locations={locations} invoices={invoices} setInvoices={setInvoices} onRefresh={loadData} />}
               {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
               {page === "locations" && <LocationsPage products={products} invoices={invoices} locations={locations} />}
