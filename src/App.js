@@ -643,9 +643,9 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
     if (!newInv.customer || !newInv.location_id || newInv.items.length === 0) return;
     setSaving(true);
     const invId = uid();
-    // Sales = always paid. Purchases = use selected payment status
-    const status = newInv.type === "sell" ? "paid" : newInv.paymentStatus;
-    const amountPaid = newInv.type === "sell" ? grandTotal : (newInv.paymentStatus === "paid" ? grandTotal : newInv.paymentStatus === "partial" ? (+newInv.amountPaid || 0) : 0);
+    // Both sales and purchases use selected payment status
+    const status = newInv.paymentStatus;
+    const amountPaid = newInv.paymentStatus === "paid" ? grandTotal : newInv.paymentStatus === "partial" ? (+newInv.amountPaid || 0) : 0;
     const { error: invErr } = await supabase.from("invoices").insert({
       id: invId, type: newInv.type, date: newInv.date,
       location_id: +newInv.location_id, customer: newInv.customer, status,
@@ -837,34 +837,32 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16, border: `1px solid ${T.yellow}33` }}>
               <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 }}>💳 Payment Details</div>
 
-              {/* Payment Status — purchases only */}
-              {newInv.type === "buy" && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textTransform: "uppercase" }}>Payment Status</div>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {[
-                      { val: "pending", label: "⏳ Pending", desc: "Not paid yet", color: T.red },
-                      { val: "partial", label: "🔶 Partial", desc: "Partially paid", color: T.yellow },
-                      { val: "paid", label: "✅ Paid", desc: "Fully paid", color: T.green },
-                    ].map(opt => (
-                      <button key={opt.val} onClick={() => setNewInv({...newInv, paymentStatus: opt.val})} style={{ background: newInv.paymentStatus === opt.val ? opt.color+"33" : "transparent", color: newInv.paymentStatus === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.paymentStatus === opt.val ? opt.color : T.border}`, borderRadius: 10, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all .15s" }}>
-                        <div>{opt.label}</div>
-                        <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>{opt.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                  {newInv.paymentStatus === "partial" && (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Amount Paid Now ($)</div>
-                      <input type="number" value={newInv.amountPaid} onChange={e => setNewInv({...newInv, amountPaid: e.target.value})} placeholder="0.00" style={{ maxWidth: 200 }} min="0" max={grandTotal} />
-                      {newInv.amountPaid && <div style={{ fontSize: 12, color: T.yellow, marginTop: 6, fontFamily: T.mono }}>Remaining: {fmt(grandTotal - (+newInv.amountPaid || 0))}</div>}
-                    </div>
-                  )}
+              {/* Payment Status — for both sales and purchases */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textTransform: "uppercase" }}>Payment Status</div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {[
+                    { val: "pending", label: "⏳ Pending", desc: "Not paid yet", color: T.red },
+                    { val: "partial", label: "🔶 Partial", desc: "Partially paid", color: T.yellow },
+                    { val: "paid", label: "✅ Paid", desc: "Fully paid", color: T.green },
+                  ].map(opt => (
+                    <button key={opt.val} onClick={() => setNewInv({...newInv, paymentStatus: opt.val})} style={{ background: newInv.paymentStatus === opt.val ? opt.color+"33" : "transparent", color: newInv.paymentStatus === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.paymentStatus === opt.val ? opt.color : T.border}`, borderRadius: 10, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all .15s" }}>
+                      <div>{opt.label}</div>
+                      <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>{opt.desc}</div>
+                    </button>
+                  ))}
                 </div>
-              )}
+                {newInv.paymentStatus === "partial" && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Amount Paid Now ($)</div>
+                    <input type="number" value={newInv.amountPaid} onChange={e => setNewInv({...newInv, amountPaid: e.target.value})} placeholder="0.00" style={{ maxWidth: 200 }} min="0" max={grandTotal} />
+                    {newInv.amountPaid && <div style={{ fontSize: 12, color: T.yellow, marginTop: 6, fontFamily: T.mono }}>Remaining: {fmt(grandTotal - (+newInv.amountPaid || 0))}</div>}
+                  </div>
+                )}
+              </div>
 
-              {/* Payment Method — show for sales always, and for purchases when not pending */}
-              {(newInv.type === "sell" || newInv.paymentStatus !== "pending") && (
+              {/* Payment Method — show when not pending */}
+              {newInv.paymentStatus !== "pending" && (
                 <div>
                   <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textTransform: "uppercase" }}>Payment Method</div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
@@ -928,11 +926,11 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     <td>
                       <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
                         <Badge color={payColor}>{payLabel}</Badge>
-                        {payStatus !== "paid" && inv.type === "buy" && (
+                        {payStatus !== "paid" && (
                           <div style={{ display:"flex", gap:4, alignItems:"center" }}>
                             <span style={{ fontSize:11, color:T.muted, fontFamily:T.mono }}>Due: {fmt(amountDue)}</span>
                             <button onClick={async () => {
-                              if(window.confirm("Mark this purchase as fully paid?")) {
+                              if(window.confirm(`Mark this ${inv.type === "sell" ? "sale" : "purchase"} as fully paid?`)) {
                                 await supabase.from("invoices").update({ status:"paid", payment_status:"paid", amount_paid: inv.total }).eq("id", inv.id);
                                 onRefresh();
                               }
