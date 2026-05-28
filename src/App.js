@@ -617,6 +617,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [printInv, setPrintInv] = useState(null);
+  const [editInv, setEditInv] = useState(null);
   const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
@@ -692,9 +693,126 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
     setPrintInv({ ...inv, invoice_items: items });
   };
 
+  const handlePrint = async (inv) => {
+    const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
+    setPrintInv({ ...inv, invoice_items: items });
+  };
+
+  const saveEdit = async () => {
+    if (!editInv) return;
+    setSaving(true);
+    const amountPaid = editInv.payment_status === "paid" ? editInv.total : editInv.payment_status === "partial" ? (+editInv.amount_paid || 0) : 0;
+    await supabase.from("invoices").update({
+      customer: editInv.customer,
+      date: editInv.date,
+      location_id: +editInv.location_id,
+      payment_status: editInv.payment_status,
+      status: editInv.payment_status,
+      amount_paid: amountPaid,
+      payment_method: editInv.payment_status === "pending" ? null : editInv.payment_method,
+      payment_reference: editInv.payment_reference || null,
+      notes: editInv.notes || null,
+    }).eq("id", editInv.id);
+    setEditInv(null);
+    onRefresh();
+    setSaving(false);
+  };
+
   return (
     <div className="page">
       {printInv && <PrintInvoice inv={printInv} locations={locations} onClose={() => setPrintInv(null)} />}
+
+      {/* Edit Invoice Modal */}
+      {editInv && (
+        <div style={{ position:"fixed", inset:0, background:"#000a", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:T.card, border:`1px solid ${T.accent}44`, borderRadius:16, padding:28, width:"100%", maxWidth:520, maxHeight:"90vh", overflowY:"auto" }}>
+            <h3 style={{ fontSize:16, fontWeight:700, marginBottom:6, color:T.accent }}>✏️ Edit Invoice</h3>
+            <p style={{ fontSize:12, color:T.muted, marginBottom:20, fontFamily:T.mono }}>{editInv.id} · {editInv.type === "sell" ? "Sale" : "Purchase"}</p>
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+              <div>
+                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>{editInv.type === "sell" ? "Customer" : "Supplier"}</div>
+                <input value={editInv.customer} onChange={e => setEditInv({...editInv, customer:e.target.value})} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Date</div>
+                <input type="date" value={editInv.date} onChange={e => setEditInv({...editInv, date:e.target.value})} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Location</div>
+                <select value={editInv.location_id} onChange={e => setEditInv({...editInv, location_id:e.target.value})}>
+                  {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Notes</div>
+                <input value={editInv.notes || ""} onChange={e => setEditInv({...editInv, notes:e.target.value})} placeholder="Optional" />
+              </div>
+            </div>
+
+            {/* Payment Status */}
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:8, textTransform:"uppercase" }}>Payment Status</div>
+              <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                {[
+                  { val:"pending", label:"⏳ Pending", color:T.red },
+                  { val:"partial", label:"🔶 Partial", color:T.yellow },
+                  { val:"paid", label:"✅ Paid", color:T.green },
+                ].map(opt => (
+                  <button key={opt.val} onClick={() => setEditInv({...editInv, payment_status:opt.val})} style={{ background:editInv.payment_status===opt.val?opt.color+"33":"transparent", color:editInv.payment_status===opt.val?opt.color:T.muted, border:`2px solid ${editInv.payment_status===opt.val?opt.color:T.border}`, borderRadius:10, padding:"8px 16px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {editInv.payment_status === "partial" && (
+                <div style={{ marginTop:10 }}>
+                  <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Amount Paid ($)</div>
+                  <input type="number" value={editInv.amount_paid || ""} onChange={e => setEditInv({...editInv, amount_paid:e.target.value})} placeholder="0.00" style={{ maxWidth:200 }} />
+                  <div style={{ fontSize:12, color:T.yellow, marginTop:4, fontFamily:T.mono }}>Remaining: {fmt(editInv.total - (+editInv.amount_paid || 0))}</div>
+                </div>
+              )}
+            </div>
+
+            {/* Payment Method */}
+            {editInv.payment_status !== "pending" && (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:11, color:T.muted, marginBottom:8, textTransform:"uppercase" }}>Payment Method</div>
+                <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:10 }}>
+                  {[
+                    { val:"cash_usd", label:"💵 Cash USD", color:T.green },
+                    { val:"wallet_usdt", label:"💎 Wallet USDT", color:T.accent },
+                    { val:"bank_transfer", label:"🏦 Bank Transfer", color:T.yellow },
+                  ].map(opt => (
+                    <button key={opt.val} onClick={() => setEditInv({...editInv, payment_method:opt.val})} style={{ background:editInv.payment_method===opt.val?opt.color+"33":"transparent", color:editInv.payment_method===opt.val?opt.color:T.muted, border:`2px solid ${editInv.payment_method===opt.val?opt.color:T.border}`, borderRadius:10, padding:"8px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {(editInv.payment_method === "wallet_usdt" || editInv.payment_method === "bank_transfer") && (
+                  <div>
+                    <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Reference #</div>
+                    <input value={editInv.payment_reference || ""} onChange={e => setEditInv({...editInv, payment_reference:e.target.value})} placeholder="Tx ID / Bank Ref #" style={{ maxWidth:300 }} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Summary */}
+            <div style={{ background:T.surface, borderRadius:8, padding:12, marginBottom:20, fontFamily:T.mono, fontSize:13 }}>
+              <div style={{ display:"flex", justifyContent:"space-between" }}>
+                <span style={{ color:T.muted }}>Invoice Total</span>
+                <span style={{ fontWeight:800, color:T.accent }}>{fmt(editInv.total)}</span>
+              </div>
+            </div>
+
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn onClick={saveEdit} loading={saving}>Save Changes</Btn>
+              <Btn outline onClick={() => setEditInv(null)}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 28, fontWeight: 800 }}>Invoices</h2>
@@ -920,7 +1038,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       <div style={{ overflowX: "auto" }}>
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", minWidth: 600 }}>
           <table>
-            <thead><tr><th>Invoice</th><th>Type</th><th className="hide-mobile">Date</th><th className="hide-mobile">Location</th><th>Customer</th><th>Total</th><th>Payment</th><th className="hide-mobile">Method</th><th>Print</th><th>Del</th></tr></thead>
+            <thead><tr><th>Invoice</th><th>Type</th><th className="hide-mobile">Date</th><th className="hide-mobile">Location</th><th>Customer</th><th>Total</th><th>Payment</th><th className="hide-mobile">Method</th><th>Edit</th><th>Print</th><th>Del</th></tr></thead>
             <tbody>
               {filtered.map(inv => {
                 const payStatus = inv.payment_status || inv.status || "paid";
@@ -955,6 +1073,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     <td className="hide-mobile">
                       {pm ? <Badge color={pm==="cash_usd"?T.green:pm==="wallet_usdt"?T.accent:T.yellow}>{pm==="cash_usd"?"💵 Cash":pm==="wallet_usdt"?"💎 USDT":"🏦 Bank"}</Badge> : <span style={{ color:T.muted, fontSize:12 }}>—</span>}
                     </td>
+                    <td><button onClick={() => setEditInv({ ...inv, payment_status: inv.payment_status || inv.status || "paid", payment_method: inv.payment_method || "cash_usd" })} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 10px", color:T.accent, fontSize:12, cursor:"pointer" }}>✏️</button></td>
                     <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
                     <td><button onClick={async () => {
                       if(window.confirm(`Delete this ${inv.type === "sell" ? "sale" : "purchase"} invoice? Stock will be reversed automatically.`)) {
