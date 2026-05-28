@@ -1273,11 +1273,11 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
                 {order.status === "draft" && (
                   <Btn small outline onClick={() => updateStatus(order.id, "cancelled")} color={T.red}>✕ Cancel</Btn>
                 )}
+                {(order.status === "draft" || order.status === "cancelled") && (
+                  <button onClick={async () => { if(window.confirm("Delete this order permanently?")) { await supabase.from("sales_order_items").delete().eq("order_id", order.id); await supabase.from("sales_orders").delete().eq("id", order.id); loadOrders(); }}} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"6px 12px", color:T.red, fontSize:12, cursor:"pointer" }}>🗑️ Delete</button>
+                )}
                 {order.status === "invoiced" && (
                   <span style={{ fontSize: 12, color: T.green, fontFamily: T.mono }}>✓ Invoice created successfully</span>
-                )}
-                {order.status === "cancelled" && (
-                  <span style={{ fontSize: 12, color: T.red, fontFamily: T.mono }}>✕ Order cancelled</span>
                 )}
               </div>
             </div>
@@ -1544,46 +1544,84 @@ function StockTransfer({ products, locations, onRefresh }) {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editTransfer, setEditTransfer] = useState(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), from_location_id: "", to_location_id: "", product_id: "", quantity: 1, notes: "" });
 
-  useEffect(() => {
-    supabase.from("stock_transfers").select("*").order("date", { ascending: false }).then(({ data }) => {
-      setTransfers(data || []);
-      setLoading(false);
-    });
-  }, []);
+  const load = async () => {
+    const { data } = await supabase.from("stock_transfers").select("*").order("date", { ascending: false });
+    setTransfers(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
 
   const save = async () => {
     if (!form.from_location_id || !form.to_location_id || !form.product_id || form.from_location_id === form.to_location_id) return;
     setSaving(true);
     const prod = products.find(p => p.id === +form.product_id);
     const tid = "TRF-" + Math.random().toString(36).slice(2,8).toUpperCase();
-    // Check stock availability
     const fromStock = prod?.stockByLocation?.[+form.from_location_id] || 0;
     if (fromStock < +form.quantity) { alert(`Not enough stock! Available: ${fromStock}`); setSaving(false); return; }
-    // Deduct from source
     await supabase.from("stock").update({ quantity: fromStock - +form.quantity }).eq("product_id", +form.product_id).eq("location_id", +form.from_location_id);
-    // Add to destination
     const { data: toStock } = await supabase.from("stock").select("quantity").eq("product_id", +form.product_id).eq("location_id", +form.to_location_id).single();
     if (toStock) {
       await supabase.from("stock").update({ quantity: toStock.quantity + +form.quantity }).eq("product_id", +form.product_id).eq("location_id", +form.to_location_id);
     } else {
       await supabase.from("stock").insert({ product_id: +form.product_id, location_id: +form.to_location_id, quantity: +form.quantity });
     }
-    // Record transfer
     await supabase.from("stock_transfers").insert({ id: tid, date: form.date, from_location_id: +form.from_location_id, to_location_id: +form.to_location_id, product_id: +form.product_id, product_name: prod?.name || "", quantity: +form.quantity, notes: form.notes });
     setForm({ date: new Date().toISOString().slice(0,10), from_location_id: "", to_location_id: "", product_id: "", quantity: 1, notes: "" });
     setShowAdd(false);
-    const { data } = await supabase.from("stock_transfers").select("*").order("date", { ascending: false });
-    setTransfers(data || []);
+    load();
     onRefresh();
     setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editTransfer) return;
+    setSaving(true);
+    await supabase.from("stock_transfers").update({ date: editTransfer.date, notes: editTransfer.notes }).eq("id", editTransfer.id);
+    setEditTransfer(null);
+    load();
+    setSaving(false);
+  };
+
+  const del = async (t) => {
+    if (!window.confirm("Delete this transfer? Stock will be reversed automatically.")) return;
+    // Reverse stock: add back to from, deduct from to
+    const { data: fromRow } = await supabase.from("stock").select("quantity").eq("product_id", t.product_id).eq("location_id", t.from_location_id).single();
+    const { data: toRow } = await supabase.from("stock").select("quantity").eq("product_id", t.product_id).eq("location_id", t.to_location_id).single();
+    if (fromRow) await supabase.from("stock").update({ quantity: fromRow.quantity + t.quantity }).eq("product_id", t.product_id).eq("location_id", t.from_location_id);
+    if (toRow) await supabase.from("stock").update({ quantity: Math.max(0, toRow.quantity - t.quantity) }).eq("product_id", t.product_id).eq("location_id", t.to_location_id);
+    await supabase.from("stock_transfers").delete().eq("id", t.id);
+    load();
+    onRefresh();
   };
 
   const locName = (id) => locations.find(l => l.id === id)?.name || id;
 
   return (
     <div className="page">
+      {editTransfer && (
+        <div style={{ position:"fixed", inset:0, background:"#000a", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:T.card, border:`1px solid ${T.accent}44`, borderRadius:16, padding:28, width:"100%", maxWidth:400 }}>
+            <h3 style={{ fontSize:16, fontWeight:700, marginBottom:20, color:T.accent }}>✏️ Edit Transfer</h3>
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>DATE</div>
+              <input type="date" value={editTransfer.date} onChange={e => setEditTransfer({...editTransfer, date:e.target.value})} />
+            </div>
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>NOTES</div>
+              <input value={editTransfer.notes||""} onChange={e => setEditTransfer({...editTransfer, notes:e.target.value})} placeholder="Notes" />
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn onClick={saveEdit} loading={saving}>Save</Btn>
+              <Btn outline onClick={() => setEditTransfer(null)}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 28, fontWeight: 800 }}>Stock Transfer</h2>
@@ -1628,7 +1666,7 @@ function StockTransfer({ products, locations, onRefresh }) {
       {loading ? <Loader /> : (
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
           <table>
-            <thead><tr><th>ID</th><th>Date</th><th>Product</th><th>From</th><th>To</th><th>Qty</th><th>Notes</th></tr></thead>
+            <thead><tr><th>ID</th><th>Date</th><th>Product</th><th>From</th><th>To</th><th>Qty</th><th>Notes</th><th>Actions</th></tr></thead>
             <tbody>
               {transfers.map(t => (
                 <tr key={t.id}>
@@ -1639,9 +1677,15 @@ function StockTransfer({ products, locations, onRefresh }) {
                   <td><Badge color={T.green}>{locName(t.to_location_id)}</Badge></td>
                   <td style={{ fontFamily: T.mono, color: T.accent, fontWeight: 700 }}>{t.quantity}</td>
                   <td style={{ fontSize: 12, color: T.muted }}>{t.notes || "—"}</td>
+                  <td>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button onClick={() => setEditTransfer(t)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                      <button onClick={() => del(t)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
-              {transfers.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", color: T.muted, padding: 32 }}>No transfers yet</td></tr>}
+              {transfers.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", color: T.muted, padding: 32 }}>No transfers yet</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2031,6 +2075,7 @@ function ReceiptsPage({ clients }) {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editReceipt, setEditReceipt] = useState(null);
   const [filterClient, setFilterClient] = useState("");
   const [filterMethod, setFilterMethod] = useState("");
   const [form, setForm] = useState({ client_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
@@ -2048,10 +2093,18 @@ function ReceiptsPage({ clients }) {
     setSaving(true);
     const id = "RCP-" + Math.random().toString(36).slice(2,8).toUpperCase();
     await supabase.from("receipts").insert({ ...form, id, amount: +form.amount, client_id: +form.client_id });
-    // Also record in client_payments for balance tracking
     await supabase.from("client_payments").insert({ client_id: +form.client_id, date: form.date, amount: +form.amount, type: "payment", notes: form.notes, payment_method: form.payment_method, reference: form.reference });
     setForm({ client_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
     setShowAdd(false);
+    load();
+    setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editReceipt) return;
+    setSaving(true);
+    await supabase.from("receipts").update({ date: editReceipt.date, amount: +editReceipt.amount, payment_method: editReceipt.payment_method, reference: editReceipt.reference, notes: editReceipt.notes }).eq("id", editReceipt.id);
+    setEditReceipt(null);
     load();
     setSaving(false);
   };
@@ -2073,6 +2126,30 @@ function ReceiptsPage({ clients }) {
 
   return (
     <div className="page">
+      {editReceipt && (
+        <div style={{ position:"fixed", inset:0, background:"#000a", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:T.card, border:`1px solid ${T.green}44`, borderRadius:16, padding:28, width:"100%", maxWidth:440 }}>
+            <h3 style={{ fontSize:16, fontWeight:700, marginBottom:20, color:T.green }}>✏️ Edit Receipt</h3>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>DATE</div><input type="date" value={editReceipt.date} onChange={e => setEditReceipt({...editReceipt,date:e.target.value})} /></div>
+              <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>AMOUNT ($)</div><input type="number" value={editReceipt.amount} onChange={e => setEditReceipt({...editReceipt,amount:e.target.value})} /></div>
+              <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>PAYMENT METHOD</div>
+                <select value={editReceipt.payment_method} onChange={e => setEditReceipt({...editReceipt,payment_method:e.target.value})}>
+                  <option value="cash_usd">💵 Cash USD</option>
+                  <option value="wallet_usdt">💎 Wallet USDT</option>
+                  <option value="bank_transfer">🏦 Bank Transfer</option>
+                </select>
+              </div>
+              <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>REFERENCE #</div><input value={editReceipt.reference||""} onChange={e => setEditReceipt({...editReceipt,reference:e.target.value})} placeholder="Ref #" /></div>
+              <div style={{ gridColumn:"1/-1" }}><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>NOTES</div><input value={editReceipt.notes||""} onChange={e => setEditReceipt({...editReceipt,notes:e.target.value})} placeholder="Notes" /></div>
+            </div>
+            <div style={{ display:"flex", gap:10, marginTop:20 }}>
+              <Btn onClick={saveEdit} loading={saving}>Save Changes</Btn>
+              <Btn outline onClick={() => setEditReceipt(null)}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:12 }}>
         <div>
           <h2 style={{ fontSize:28, fontWeight:800 }}>Receipts</h2>
@@ -2149,7 +2226,7 @@ function ReceiptsPage({ clients }) {
       {loading ? <Loader /> : (
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
           <table>
-            <thead><tr><th>ID</th><th>Date</th><th>Client</th><th>Method</th><th>Reference</th><th>Amount</th><th>Del</th></tr></thead>
+            <thead><tr><th>ID</th><th>Date</th><th>Client</th><th>Method</th><th>Reference</th><th>Amount</th><th>Actions</th></tr></thead>
             <tbody>
               {filtered.map(r => (
                 <tr key={r.id}>
@@ -2159,7 +2236,12 @@ function ReceiptsPage({ clients }) {
                   <td><Badge color={pmColor[r.payment_method]}>{pmLabel[r.payment_method]}</Badge></td>
                   <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{r.reference || "—"}</td>
                   <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{fmt(r.amount)}</td>
-                  <td><button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button></td>
+                  <td>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button onClick={() => setEditReceipt(r)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                      <button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {filtered.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No receipts found</td></tr>}
@@ -2179,6 +2261,7 @@ function PaymentsPage({ suppliers }) {
   const [saving, setSaving] = useState(false);
   const [filterSupplier, setFilterSupplier] = useState("");
   const [filterMethod, setFilterMethod] = useState("");
+  const [editPayment, setEditPayment] = useState(null);
   const [form, setForm] = useState({ supplier_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
 
   const load = async () => {
@@ -2194,10 +2277,18 @@ function PaymentsPage({ suppliers }) {
     setSaving(true);
     const id = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
     await supabase.from("payments").insert({ ...form, id, amount: +form.amount, supplier_id: +form.supplier_id });
-    // Also record in supplier_payments for balance tracking
     await supabase.from("supplier_payments").insert({ supplier_id: +form.supplier_id, date: form.date, amount: +form.amount, type: "payment", notes: form.notes, payment_method: form.payment_method, reference: form.reference });
     setForm({ supplier_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
     setShowAdd(false);
+    load();
+    setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editPayment) return;
+    setSaving(true);
+    await supabase.from("payments").update({ date: editPayment.date, amount: +editPayment.amount, payment_method: editPayment.payment_method, reference: editPayment.reference, notes: editPayment.notes }).eq("id", editPayment.id);
+    setEditPayment(null);
     load();
     setSaving(false);
   };
@@ -2219,6 +2310,30 @@ function PaymentsPage({ suppliers }) {
 
   return (
     <div className="page">
+      {editPayment && (
+        <div style={{ position:"fixed", inset:0, background:"#000a", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:T.card, border:`1px solid ${T.red}44`, borderRadius:16, padding:28, width:"100%", maxWidth:440 }}>
+            <h3 style={{ fontSize:16, fontWeight:700, marginBottom:20, color:T.red }}>✏️ Edit Payment</h3>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>DATE</div><input type="date" value={editPayment.date} onChange={e => setEditPayment({...editPayment,date:e.target.value})} /></div>
+              <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>AMOUNT ($)</div><input type="number" value={editPayment.amount} onChange={e => setEditPayment({...editPayment,amount:e.target.value})} /></div>
+              <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>PAYMENT METHOD</div>
+                <select value={editPayment.payment_method} onChange={e => setEditPayment({...editPayment,payment_method:e.target.value})}>
+                  <option value="cash_usd">💵 Cash USD</option>
+                  <option value="wallet_usdt">💎 Wallet USDT</option>
+                  <option value="bank_transfer">🏦 Bank Transfer</option>
+                </select>
+              </div>
+              <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>REFERENCE #</div><input value={editPayment.reference||""} onChange={e => setEditPayment({...editPayment,reference:e.target.value})} placeholder="Ref #" /></div>
+              <div style={{ gridColumn:"1/-1" }}><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>NOTES</div><input value={editPayment.notes||""} onChange={e => setEditPayment({...editPayment,notes:e.target.value})} placeholder="Notes" /></div>
+            </div>
+            <div style={{ display:"flex", gap:10, marginTop:20 }}>
+              <Btn onClick={saveEdit} loading={saving}>Save Changes</Btn>
+              <Btn outline onClick={() => setEditPayment(null)}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:12 }}>
         <div>
           <h2 style={{ fontSize:28, fontWeight:800 }}>Payments</h2>
@@ -2295,7 +2410,7 @@ function PaymentsPage({ suppliers }) {
       {loading ? <Loader /> : (
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
           <table>
-            <thead><tr><th>ID</th><th>Date</th><th>Supplier</th><th>Method</th><th>Reference</th><th>Amount</th><th>Del</th></tr></thead>
+            <thead><tr><th>ID</th><th>Date</th><th>Supplier</th><th>Method</th><th>Reference</th><th>Amount</th><th>Actions</th></tr></thead>
             <tbody>
               {filtered.map(p => (
                 <tr key={p.id}>
@@ -2305,7 +2420,12 @@ function PaymentsPage({ suppliers }) {
                   <td><Badge color={pmColor[p.payment_method]}>{pmLabel[p.payment_method]}</Badge></td>
                   <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{p.reference || "—"}</td>
                   <td style={{ fontFamily:T.mono, color:T.red, fontWeight:700 }}>{fmt(p.amount)}</td>
-                  <td><button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button></td>
+                  <td>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button onClick={() => setEditPayment(p)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                      <button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {filtered.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No payments found</td></tr>}
