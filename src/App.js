@@ -298,6 +298,19 @@ function PrintInvoice({ inv, locations, onClose }) {
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 16, fontWeight: 800, borderTop: "2px solid #000", marginTop: 8 }}>
                 <span>TOTAL</span><span>{fmt(total)}</span>
               </div>
+              {inv.payment_method && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, marginTop: 4, color: "#333" }}>
+                  <span>Payment Method</span>
+                  <span style={{ fontWeight: 700 }}>
+                    {inv.payment_method === "cash_usd" ? "💵 Cash USD" : inv.payment_method === "wallet_usdt" ? "💎 Wallet USDT" : "🏦 Bank Transfer"}
+                  </span>
+                </div>
+              )}
+              {inv.payment_reference && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, color: "#666" }}>
+                  <span>Reference</span><span style={{ fontFamily: "monospace" }}>{inv.payment_reference}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -602,7 +615,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [printInv, setPrintInv] = useState(null);
-  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "" });
+  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
   const filtered = invoices.filter(i => typeFilter === "all" || i.type === typeFilter)
@@ -637,6 +650,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       id: invId, type: newInv.type, date: newInv.date,
       location_id: +newInv.location_id, customer: newInv.customer, status,
       payment_status: status, amount_paid: amountPaid,
+      payment_method: newInv.paymentStatus === "pending" ? null : newInv.paymentMethod,
+      payment_reference: newInv.paymentReference || null,
       discount_type: newInv.discountType, discount_value: +newInv.discountValue || 0,
       shipment_type: newInv.shipmentType, shipment_value: +newInv.shipmentValue || 0,
       client_id: newInv.client_id ? +newInv.client_id : null,
@@ -653,7 +668,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         }
       }
       setShowCreate(false);
-      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "" });
+      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
       onRefresh();
     }
     setSaving(false);
@@ -817,29 +832,60 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             </div>
           )}
 
-          {/* Payment Status — only for Purchase invoices */}
-          {newInv.type === "buy" && newInv.items.length > 0 && (
+          {/* Payment Section — for all invoices when items exist */}
+          {newInv.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16, border: `1px solid ${T.yellow}33` }}>
-              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>💳 Payment Status</div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-                {[
-                  { val: "pending", label: "⏳ Pending", desc: "Not paid yet", color: T.red },
-                  { val: "partial", label: "🔶 Partial", desc: "Partially paid", color: T.yellow },
-                  { val: "paid", label: "✅ Paid", desc: "Fully paid", color: T.green },
-                ].map(opt => (
-                  <button key={opt.val} onClick={() => setNewInv({...newInv, paymentStatus: opt.val})} style={{ background: newInv.paymentStatus === opt.val ? opt.color+"33" : "transparent", color: newInv.paymentStatus === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.paymentStatus === opt.val ? opt.color : T.border}`, borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all .15s" }}>
-                    <div>{opt.label}</div>
-                    <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>{opt.desc}</div>
-                  </button>
-                ))}
-              </div>
-              {newInv.paymentStatus === "partial" && (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Amount Paid Now ($)</div>
-                  <input type="number" value={newInv.amountPaid} onChange={e => setNewInv({...newInv, amountPaid: e.target.value})} placeholder="0.00" style={{ maxWidth: 200 }} min="0" max={grandTotal} />
-                  {newInv.amountPaid && <div style={{ fontSize: 12, color: T.yellow, marginTop: 6, fontFamily: T.mono }}>
-                    Remaining: {fmt(grandTotal - (+newInv.amountPaid || 0))}
-                  </div>}
+              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 }}>💳 Payment Details</div>
+
+              {/* Payment Status — purchases only */}
+              {newInv.type === "buy" && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textTransform: "uppercase" }}>Payment Status</div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {[
+                      { val: "pending", label: "⏳ Pending", desc: "Not paid yet", color: T.red },
+                      { val: "partial", label: "🔶 Partial", desc: "Partially paid", color: T.yellow },
+                      { val: "paid", label: "✅ Paid", desc: "Fully paid", color: T.green },
+                    ].map(opt => (
+                      <button key={opt.val} onClick={() => setNewInv({...newInv, paymentStatus: opt.val})} style={{ background: newInv.paymentStatus === opt.val ? opt.color+"33" : "transparent", color: newInv.paymentStatus === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.paymentStatus === opt.val ? opt.color : T.border}`, borderRadius: 10, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all .15s" }}>
+                        <div>{opt.label}</div>
+                        <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>{opt.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {newInv.paymentStatus === "partial" && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Amount Paid Now ($)</div>
+                      <input type="number" value={newInv.amountPaid} onChange={e => setNewInv({...newInv, amountPaid: e.target.value})} placeholder="0.00" style={{ maxWidth: 200 }} min="0" max={grandTotal} />
+                      {newInv.amountPaid && <div style={{ fontSize: 12, color: T.yellow, marginTop: 6, fontFamily: T.mono }}>Remaining: {fmt(grandTotal - (+newInv.amountPaid || 0))}</div>}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Payment Method — show for sales always, and for purchases when not pending */}
+              {(newInv.type === "sell" || newInv.paymentStatus !== "pending") && (
+                <div>
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textTransform: "uppercase" }}>Payment Method</div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                    {[
+                      { val: "cash_usd", label: "💵 Cash USD", color: T.green },
+                      { val: "wallet_usdt", label: "💎 Wallet USDT", color: T.accent },
+                      { val: "bank_transfer", label: "🏦 Bank Transfer", color: T.yellow },
+                    ].map(opt => (
+                      <button key={opt.val} onClick={() => setNewInv({...newInv, paymentMethod: opt.val})} style={{ background: newInv.paymentMethod === opt.val ? opt.color+"33" : "transparent", color: newInv.paymentMethod === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.paymentMethod === opt.val ? opt.color : T.border}`, borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all .15s" }}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {(newInv.paymentMethod === "wallet_usdt" || newInv.paymentMethod === "bank_transfer") && (
+                    <div>
+                      <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>
+                        {newInv.paymentMethod === "wallet_usdt" ? "Transaction ID / Wallet Address" : "Bank Reference #"}
+                      </div>
+                      <input value={newInv.paymentReference} onChange={e => setNewInv({...newInv, paymentReference: e.target.value})} placeholder={newInv.paymentMethod === "wallet_usdt" ? "Tx ID..." : "Bank Ref #..."} style={{ maxWidth: 300 }} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -863,13 +909,14 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       <div style={{ overflowX: "auto" }}>
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", minWidth: 600 }}>
           <table>
-            <thead><tr><th>Invoice</th><th>Type</th><th className="hide-mobile">Date</th><th className="hide-mobile">Location</th><th>Customer</th><th>Total</th><th>Payment</th><th>Print</th><th>Del</th></tr></thead>
+            <thead><tr><th>Invoice</th><th>Type</th><th className="hide-mobile">Date</th><th className="hide-mobile">Location</th><th>Customer</th><th>Total</th><th>Payment</th><th className="hide-mobile">Method</th><th>Print</th><th>Del</th></tr></thead>
             <tbody>
               {filtered.map(inv => {
                 const payStatus = inv.payment_status || inv.status || "paid";
                 const payColor = payStatus === "paid" ? T.green : payStatus === "partial" ? T.yellow : T.red;
                 const payLabel = payStatus === "paid" ? "✅ PAID" : payStatus === "partial" ? "🔶 PARTIAL" : "⏳ PENDING";
                 const amountDue = inv.total - (inv.amount_paid || 0);
+                const pm = inv.payment_method;
                 return (
                   <tr key={inv.id}>
                     <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
@@ -893,6 +940,9 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                           </div>
                         )}
                       </div>
+                    </td>
+                    <td className="hide-mobile">
+                      {pm ? <Badge color={pm==="cash_usd"?T.green:pm==="wallet_usdt"?T.accent:T.yellow}>{pm==="cash_usd"?"💵 Cash":pm==="wallet_usdt"?"💎 USDT":"🏦 Bank"}</Badge> : <span style={{ color:T.muted, fontSize:12 }}>—</span>}
                     </td>
                     <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
                     <td><button onClick={async () => {
