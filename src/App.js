@@ -602,7 +602,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [printInv, setPrintInv] = useState(null);
-  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0 });
+  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "" });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
   const filtered = invoices.filter(i => typeFilter === "all" || i.type === typeFilter)
@@ -630,9 +630,13 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
     if (!newInv.customer || !newInv.location_id || newInv.items.length === 0) return;
     setSaving(true);
     const invId = uid();
+    // Sales = always paid. Purchases = use selected payment status
+    const status = newInv.type === "sell" ? "paid" : newInv.paymentStatus;
+    const amountPaid = newInv.type === "sell" ? grandTotal : (newInv.paymentStatus === "paid" ? grandTotal : newInv.paymentStatus === "partial" ? (+newInv.amountPaid || 0) : 0);
     const { error: invErr } = await supabase.from("invoices").insert({
       id: invId, type: newInv.type, date: newInv.date,
-      location_id: +newInv.location_id, customer: newInv.customer, status: "paid",
+      location_id: +newInv.location_id, customer: newInv.customer, status,
+      payment_status: status, amount_paid: amountPaid,
       discount_type: newInv.discountType, discount_value: +newInv.discountValue || 0,
       shipment_type: newInv.shipmentType, shipment_value: +newInv.shipmentValue || 0,
       client_id: newInv.client_id ? +newInv.client_id : null,
@@ -649,7 +653,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         }
       }
       setShowCreate(false);
-      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0 });
+      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "" });
       onRefresh();
     }
     setSaving(false);
@@ -813,6 +817,34 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             </div>
           )}
 
+          {/* Payment Status — only for Purchase invoices */}
+          {newInv.type === "buy" && newInv.items.length > 0 && (
+            <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16, border: `1px solid ${T.yellow}33` }}>
+              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>💳 Payment Status</div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                {[
+                  { val: "pending", label: "⏳ Pending", desc: "Not paid yet", color: T.red },
+                  { val: "partial", label: "🔶 Partial", desc: "Partially paid", color: T.yellow },
+                  { val: "paid", label: "✅ Paid", desc: "Fully paid", color: T.green },
+                ].map(opt => (
+                  <button key={opt.val} onClick={() => setNewInv({...newInv, paymentStatus: opt.val})} style={{ background: newInv.paymentStatus === opt.val ? opt.color+"33" : "transparent", color: newInv.paymentStatus === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.paymentStatus === opt.val ? opt.color : T.border}`, borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all .15s" }}>
+                    <div>{opt.label}</div>
+                    <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {newInv.paymentStatus === "partial" && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Amount Paid Now ($)</div>
+                  <input type="number" value={newInv.amountPaid} onChange={e => setNewInv({...newInv, amountPaid: e.target.value})} placeholder="0.00" style={{ maxWidth: 200 }} min="0" max={grandTotal} />
+                  {newInv.amountPaid && <div style={{ fontSize: 12, color: T.yellow, marginTop: 6, fontFamily: T.mono }}>
+                    Remaining: {fmt(grandTotal - (+newInv.amountPaid || 0))}
+                  </div>}
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <Btn onClick={saveInvoice} loading={saving} disabled={!newInv.customer || !newInv.location_id || newInv.items.length === 0}>Save Invoice</Btn>
             <Btn outline onClick={() => setShowCreate(false)}>Cancel</Btn>
@@ -831,39 +863,58 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       <div style={{ overflowX: "auto" }}>
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", minWidth: 600 }}>
           <table>
-            <thead><tr><th>Invoice</th><th>Type</th><th className="hide-mobile">Date</th><th className="hide-mobile">Location</th><th>Customer</th><th>Total</th><th className="hide-mobile">Status</th><th>Print</th><th>Del</th></tr></thead>
+            <thead><tr><th>Invoice</th><th>Type</th><th className="hide-mobile">Date</th><th className="hide-mobile">Location</th><th>Customer</th><th>Total</th><th>Payment</th><th>Print</th><th>Del</th></tr></thead>
             <tbody>
-              {filtered.map(inv => (
-                <tr key={inv.id}>
-                  <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
-                  <td><Badge color={inv.type === "sell" ? T.green : T.yellow}>{inv.type === "sell" ? "SALE" : "BUY"}</Badge></td>
-                  <td className="hide-mobile" style={{ color: T.muted, fontSize: 12 }}>{inv.date}</td>
-                  <td className="hide-mobile" style={{ fontSize: 12 }}>{inv.locationName}</td>
-                  <td style={{ fontWeight: 600 }}>{inv.customer}</td>
-                  <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
-                  <td className="hide-mobile"><Badge color={inv.status === "paid" ? T.green : T.yellow}>{inv.status?.toUpperCase()}</Badge></td>
-                  <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
-                  <td><button onClick={async () => {
-                    if(window.confirm(`Delete this ${inv.type === "sell" ? "sale" : "purchase"} invoice? Stock will be reversed automatically.`)) {
-                      // Fetch items to reverse stock
-                      const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
-                      if (items) {
-                        for (const item of items) {
-                          const { data: stockRow } = await supabase.from("stock").select("quantity").eq("product_id", item.product_id).eq("location_id", inv.location_id).single();
-                          if (stockRow) {
-                            // Reverse: if it was a sale, add stock back. If purchase, deduct stock.
-                            const delta = inv.type === "sell" ? +item.quantity : -item.quantity;
-                            await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity + delta) }).eq("product_id", item.product_id).eq("location_id", inv.location_id);
+              {filtered.map(inv => {
+                const payStatus = inv.payment_status || inv.status || "paid";
+                const payColor = payStatus === "paid" ? T.green : payStatus === "partial" ? T.yellow : T.red;
+                const payLabel = payStatus === "paid" ? "✅ PAID" : payStatus === "partial" ? "🔶 PARTIAL" : "⏳ PENDING";
+                const amountDue = inv.total - (inv.amount_paid || 0);
+                return (
+                  <tr key={inv.id}>
+                    <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
+                    <td><Badge color={inv.type === "sell" ? T.green : T.yellow}>{inv.type === "sell" ? "SALE" : "BUY"}</Badge></td>
+                    <td className="hide-mobile" style={{ color: T.muted, fontSize: 12 }}>{inv.date}</td>
+                    <td className="hide-mobile" style={{ fontSize: 12 }}>{inv.locationName}</td>
+                    <td style={{ fontWeight: 600 }}>{inv.customer}</td>
+                    <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
+                    <td>
+                      <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                        <Badge color={payColor}>{payLabel}</Badge>
+                        {payStatus !== "paid" && inv.type === "buy" && (
+                          <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                            <span style={{ fontSize:11, color:T.muted, fontFamily:T.mono }}>Due: {fmt(amountDue)}</span>
+                            <button onClick={async () => {
+                              if(window.confirm("Mark this purchase as fully paid?")) {
+                                await supabase.from("invoices").update({ status:"paid", payment_status:"paid", amount_paid: inv.total }).eq("id", inv.id);
+                                onRefresh();
+                              }
+                            }} style={{ background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:4, padding:"2px 6px", color:T.green, fontSize:10, cursor:"pointer", whiteSpace:"nowrap" }}>Mark Paid</button>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
+                    <td><button onClick={async () => {
+                      if(window.confirm(`Delete this ${inv.type === "sell" ? "sale" : "purchase"} invoice? Stock will be reversed automatically.`)) {
+                        const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
+                        if (items) {
+                          for (const item of items) {
+                            const { data: stockRow } = await supabase.from("stock").select("quantity").eq("product_id", item.product_id).eq("location_id", inv.location_id).single();
+                            if (stockRow) {
+                              const delta = inv.type === "sell" ? +item.quantity : -item.quantity;
+                              await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity + delta) }).eq("product_id", item.product_id).eq("location_id", inv.location_id);
+                            }
                           }
                         }
+                        await supabase.from("invoice_items").delete().eq("invoice_id", inv.id);
+                        await supabase.from("invoices").delete().eq("id", inv.id);
+                        onRefresh();
                       }
-                      await supabase.from("invoice_items").delete().eq("invoice_id", inv.id);
-                      await supabase.from("invoices").delete().eq("id", inv.id);
-                      onRefresh();
-                    }
-                  }} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 10px", color: T.red, fontSize: 12, cursor: "pointer" }}>🗑️</button></td>
-                </tr>
-              ))}
+                    }} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 10px", color: T.red, fontSize: 12, cursor: "pointer" }}>🗑️</button></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
