@@ -2049,10 +2049,29 @@ function ClientBalance({ clients, invoices, onRefresh }) {
     if (!form.amount || !selected) return;
     setSaving(true);
     await supabase.from("client_payments").insert({ client_id: selected, date: form.date, amount: +form.amount, type: form.type, notes: form.notes });
+
+    // Recalculate total paid after this payment
+    const { data: allPayments } = await supabase.from("client_payments").select("*").eq("client_id", selected);
+    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
+
+    // Auto-update pending/partial invoices for this client
+    const pendingInvoices = clientInvoices.filter(i => i.payment_status !== "paid");
+    let remaining = newTotalPaid;
+    for (const inv of pendingInvoices) {
+      if (remaining >= inv.total) {
+        await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id);
+        remaining -= inv.total;
+      } else if (remaining > 0) {
+        await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id);
+        remaining = 0;
+      }
+    }
+
     setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
     setShowAdd(false);
     const { data } = await supabase.from("client_payments").select("*").eq("client_id", selected).order("date", { ascending: false });
     setPayments(data || []);
+    onRefresh(); // Refresh invoices list too
     setSaving(false);
   };
 
@@ -2165,10 +2184,29 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
     if (!form.amount || !selected) return;
     setSaving(true);
     await supabase.from("supplier_payments").insert({ supplier_id: selected, date: form.date, amount: +form.amount, type: form.type, notes: form.notes });
+
+    // Recalculate total paid after this payment
+    const { data: allPayments } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected);
+    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
+
+    // Auto-update pending/partial invoices for this supplier
+    const pendingInvoices = supplierInvoices.filter(i => i.payment_status !== "paid");
+    let remaining = newTotalPaid;
+    for (const inv of pendingInvoices) {
+      if (remaining >= inv.total) {
+        await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id);
+        remaining -= inv.total;
+      } else if (remaining > 0) {
+        await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id);
+        remaining = 0;
+      }
+    }
+
     setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
     setShowAdd(false);
     const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: false });
     setPayments(data || []);
+    onRefresh(); // Refresh invoices list too
     setSaving(false);
   };
 
@@ -2286,6 +2324,17 @@ function ReceiptsPage({ clients }) {
     const id = "RCP-" + Math.random().toString(36).slice(2,8).toUpperCase();
     await supabase.from("receipts").insert({ ...form, id, amount: +form.amount, client_id: +form.client_id });
     await supabase.from("client_payments").insert({ client_id: +form.client_id, date: form.date, amount: +form.amount, type: "payment", notes: form.notes, payment_method: form.payment_method, reference: form.reference });
+
+    // Auto-update pending invoices for this client
+    const { data: allPmts } = await supabase.from("client_payments").select("*").eq("client_id", +form.client_id);
+    const totalPd = (allPmts||[]).filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
+    const { data: pendInvs } = await supabase.from("invoices").select("*").eq("client_id", +form.client_id).neq("payment_status","paid").eq("type","sell");
+    let rem = totalPd;
+    for (const inv of (pendInvs||[])) {
+      if (rem >= inv.total) { await supabase.from("invoices").update({ payment_status:"paid", status:"paid", amount_paid: inv.total }).eq("id", inv.id); rem -= inv.total; }
+      else if (rem > 0) { await supabase.from("invoices").update({ payment_status:"partial", status:"partial", amount_paid: rem }).eq("id", inv.id); rem = 0; }
+    }
+
     setForm({ client_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
     setShowAdd(false);
     load();
@@ -2470,6 +2519,17 @@ function PaymentsPage({ suppliers }) {
     const id = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
     await supabase.from("payments").insert({ ...form, id, amount: +form.amount, supplier_id: +form.supplier_id });
     await supabase.from("supplier_payments").insert({ supplier_id: +form.supplier_id, date: form.date, amount: +form.amount, type: "payment", notes: form.notes, payment_method: form.payment_method, reference: form.reference });
+
+    // Auto-update pending invoices for this supplier
+    const { data: allPmts } = await supabase.from("supplier_payments").select("*").eq("supplier_id", +form.supplier_id);
+    const totalPd = (allPmts||[]).filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
+    const { data: pendInvs } = await supabase.from("invoices").select("*").eq("supplier_id", +form.supplier_id).neq("payment_status","paid").eq("type","buy");
+    let rem = totalPd;
+    for (const inv of (pendInvs||[])) {
+      if (rem >= inv.total) { await supabase.from("invoices").update({ payment_status:"paid", status:"paid", amount_paid: inv.total }).eq("id", inv.id); rem -= inv.total; }
+      else if (rem > 0) { await supabase.from("invoices").update({ payment_status:"partial", status:"partial", amount_paid: rem }).eq("id", inv.id); rem = 0; }
+    }
+
     setForm({ supplier_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
     setShowAdd(false);
     load();
