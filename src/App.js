@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
@@ -42,6 +42,8 @@ const css = `
     table { font-size: 11px; }
     th, td { padding: 8px 6px !important; }
   }
+  .table-wrap { overflow-x: auto; width: 100%; }
+  .table-wrap table { min-width: 600px; }
 `;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2639,6 +2641,22 @@ export default function App() {
   const [locations, setLocations] = useState([]);
   const [clients, setClients] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [sidebarWidth, setSidebarWidth] = useState(220);
+  const isResizing = useRef(false);
+
+  const startResize = (e) => {
+    isResizing.current = true;
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const onMove = (ev) => {
+      if (!isResizing.current) return;
+      const newW = Math.min(320, Math.max(60, startW + ev.clientX - startX));
+      setSidebarWidth(newW);
+    };
+    const onUp = () => { isResizing.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
   // Auth check
   useEffect(() => {
@@ -2743,27 +2761,37 @@ export default function App() {
     <>
       <style>{css}</style>
       <div style={{ display: "flex", minHeight: "100vh" }}>
-        <nav className="sidebar no-print" style={{ width: 220, background: T.surface, borderRight: `1px solid ${T.border}`, padding: "28px 0", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0 }}>
-          <div style={{ padding: "0 24px 28px", borderBottom: `1px solid ${T.border}` }}>
-            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.5 }}>
+        <nav className="sidebar no-print" style={{ width: sidebarWidth, minWidth: 60, maxWidth: 320, background: T.surface, borderRight: `1px solid ${T.border}`, padding: "28px 0", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, transition: "none", overflowY: "auto", overflowX: "hidden" }}>
+          <div style={{ padding: "0 16px 28px", borderBottom: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.5, whiteSpace: "nowrap", overflow: "hidden" }}>
               <span style={{ color: T.accent }}>⚡</span> <span className="logo-text">ElectroPro</span>
             </div>
-            <div className="logo-text" style={{ fontSize: 11, color: T.muted, marginTop: 4, letterSpacing: 1 }}>BUSINESS MANAGER</div>
+            <div className="logo-text" style={{ fontSize: 10, color: T.muted, marginTop: 4, letterSpacing: 1 }}>BUSINESS MANAGER</div>
           </div>
-          <div style={{ padding: "16px 12px", flex: 1 }}>
+          <div style={{ padding: "12px 8px", flex: 1 }}>
             {NAV.map(n => (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "11px 14px", background: page === n.id ? T.accentDim : "transparent", color: page === n.id ? T.accent : T.muted, border: "none", borderRadius: 10, fontSize: 13, fontWeight: page === n.id ? 700 : 400, textAlign: "left", marginBottom: 4, transition: "all .15s", borderLeft: page === n.id ? `2px solid ${T.accent}` : "2px solid transparent" }}>
-                <span>{n.icon}</span> <span className="nav-label">{n.label}</span>
+              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", background: page === n.id ? T.accentDim : "transparent", color: page === n.id ? T.accent : T.muted, border: "none", borderRadius: 8, fontSize: 12, fontWeight: page === n.id ? 700 : 400, textAlign: "left", marginBottom: 2, transition: "all .15s", borderLeft: page === n.id ? `2px solid ${T.accent}` : "2px solid transparent", whiteSpace: "nowrap", overflow: "hidden" }}>
+                <span style={{ flexShrink: 0 }}>{n.icon}</span>
+                <span className="nav-label" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
               </button>
             ))}
           </div>
-          <div style={{ padding: "16px 24px", borderTop: `1px solid ${T.border}` }}>
+          <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 12, color: T.text, fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="nav-label">{userProfile?.full_name}</div>
-            <div className="nav-label" style={{ marginBottom: 12 }}><Badge color={isAdmin ? T.red : isManager ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></div>
-            <button onClick={handleLogout} className="nav-label" style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 12px", color: T.muted, fontSize: 12, width: "100%", cursor: "pointer" }}>Sign Out</button>
+            <div className="nav-label" style={{ marginBottom: 10 }}><Badge color={isAdmin ? T.red : isManager ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></div>
+            <button onClick={handleLogout} className="nav-label" style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 10px", color: T.muted, fontSize: 11, width: "100%", cursor: "pointer" }}>Sign Out</button>
           </div>
         </nav>
-        <main className="main-content" style={{ flex: 1, padding: "36px 40px", overflowY: "auto" }}>
+
+        {/* Drag Handle */}
+        <div onMouseDown={startResize} className="no-print" style={{ width: 6, cursor: "col-resize", background: "transparent", borderRight: `1px solid ${T.border}`, flexShrink: 0, position: "relative", zIndex: 10, transition: "background .15s" }}
+          onMouseEnter={e => e.currentTarget.style.background = T.accent+"44"}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", fontSize: 14, color: T.muted, userSelect: "none" }}>⋮</div>
+        </div>
+
+        <main className="main-content" style={{ flex: 1, padding: "28px 32px", overflowY: "auto", overflowX: "auto", minWidth: 0 }}>
           {loading ? <Loader /> : (
             <>
               {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} />}
@@ -2775,6 +2803,7 @@ export default function App() {
               {page === "supplier-balance" && <SupplierBalance suppliers={suppliers} invoices={invoices} onRefresh={loadData} />}
               {page === "receipts" && <ReceiptsPage clients={clients} />}
               {page === "payments" && <PaymentsPage suppliers={suppliers} />}
+              {page === "orders" && <SalesOrders products={products} locations={locations} invoices={invoices} setInvoices={setInvoices} onRefresh={loadData} />}
               {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} clients={clients} suppliers={suppliers} onRefresh={loadData} userProfile={userProfile} />}
               {page === "expenses" && <ExpensesPage locations={locations} onRefresh={loadData} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
