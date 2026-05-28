@@ -770,7 +770,25 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                   <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
                   <td className="hide-mobile"><Badge color={inv.status === "paid" ? T.green : T.yellow}>{inv.status?.toUpperCase()}</Badge></td>
                   <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
-                  <td><button onClick={async () => { if(window.confirm("Delete this invoice?")) { await supabase.from("invoice_items").delete().eq("invoice_id", inv.id); await supabase.from("invoices").delete().eq("id", inv.id); onRefresh(); }}} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 10px", color: T.red, fontSize: 12, cursor: "pointer" }}>🗑️</button></td>
+                  <td><button onClick={async () => {
+                    if(window.confirm(`Delete this ${inv.type === "sell" ? "sale" : "purchase"} invoice? Stock will be reversed automatically.`)) {
+                      // Fetch items to reverse stock
+                      const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
+                      if (items) {
+                        for (const item of items) {
+                          const { data: stockRow } = await supabase.from("stock").select("quantity").eq("product_id", item.product_id).eq("location_id", inv.location_id).single();
+                          if (stockRow) {
+                            // Reverse: if it was a sale, add stock back. If purchase, deduct stock.
+                            const delta = inv.type === "sell" ? +item.quantity : -item.quantity;
+                            await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity + delta) }).eq("product_id", item.product_id).eq("location_id", inv.location_id);
+                          }
+                        }
+                      }
+                      await supabase.from("invoice_items").delete().eq("invoice_id", inv.id);
+                      await supabase.from("invoices").delete().eq("id", inv.id);
+                      onRefresh();
+                    }
+                  }} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 10px", color: T.red, fontSize: 12, cursor: "pointer" }}>🗑️</button></td>
                 </tr>
               ))}
             </tbody>
