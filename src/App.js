@@ -2021,6 +2021,302 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
   );
 }
 
+// ─── PAYMENT METHOD BADGE ─────────────────────────────────────────────────────
+const pmLabel = { cash_usd: "💵 Cash USD", wallet_usdt: "💎 Wallet USDT", bank_transfer: "🏦 Bank Transfer" };
+const pmColor = { cash_usd: "#00ff9d", wallet_usdt: "#00e5ff", bank_transfer: "#ffcc00" };
+
+// ─── RECEIPTS (Money from Clients) ───────────────────────────────────────────
+function ReceiptsPage({ clients }) {
+  const [receipts, setReceipts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [filterClient, setFilterClient] = useState("");
+  const [filterMethod, setFilterMethod] = useState("");
+  const [form, setForm] = useState({ client_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
+
+  const load = async () => {
+    const { data } = await supabase.from("receipts").select("*, clients(name)").order("date", { ascending: false });
+    setReceipts((data||[]).map(r => ({ ...r, clientName: r.clients?.name || "—" })));
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    if (!form.amount || !form.client_id) return;
+    setSaving(true);
+    const id = "RCP-" + Math.random().toString(36).slice(2,8).toUpperCase();
+    await supabase.from("receipts").insert({ ...form, id, amount: +form.amount, client_id: +form.client_id });
+    // Also record in client_payments for balance tracking
+    await supabase.from("client_payments").insert({ client_id: +form.client_id, date: form.date, amount: +form.amount, type: "payment", notes: form.notes, payment_method: form.payment_method, reference: form.reference });
+    setForm({ client_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
+    setShowAdd(false);
+    load();
+    setSaving(false);
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete this receipt?")) return;
+    await supabase.from("receipts").delete().eq("id", id);
+    load();
+  };
+
+  const filtered = receipts.filter(r =>
+    (!filterClient || r.client_id === +filterClient) &&
+    (!filterMethod || r.payment_method === filterMethod)
+  );
+  const total = filtered.reduce((s,r) => s + +r.amount, 0);
+  const byCash = filtered.filter(r=>r.payment_method==="cash_usd").reduce((s,r)=>s+(+r.amount),0);
+  const byUsdt = filtered.filter(r=>r.payment_method==="wallet_usdt").reduce((s,r)=>s+(+r.amount),0);
+  const byBank = filtered.filter(r=>r.payment_method==="bank_transfer").reduce((s,r)=>s+(+r.amount),0);
+
+  return (
+    <div className="page">
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <h2 style={{ fontSize:28, fontWeight:800 }}>Receipts</h2>
+          <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Money received from clients</p>
+        </div>
+        <Btn onClick={() => setShowAdd(!showAdd)}>+ New Receipt</Btn>
+      </div>
+
+      {/* Summary cards */}
+      <div className="stats-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:16, marginBottom:24 }}>
+        <StatCard label="Total Received" value={fmt(total)} icon="💰" color={T.green} sub={`${filtered.length} receipts`} />
+        <StatCard label="Cash USD" value={fmt(byCash)} icon="💵" color="#00ff9d" />
+        <StatCard label="Wallet USDT" value={fmt(byUsdt)} icon="💎" color="#00e5ff" />
+        <StatCard label="Bank Transfer" value={fmt(byBank)} icon="🏦" color="#ffcc00" />
+      </div>
+
+      {showAdd && (
+        <div style={{ background:T.card, border:`1px solid ${T.green}44`, borderRadius:12, padding:24, marginBottom:24 }}>
+          <h3 style={{ fontSize:14, fontWeight:700, marginBottom:16, color:T.green }}>New Receipt</h3>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>CLIENT</div>
+              <select value={form.client_id} onChange={e => setForm({...form, client_id:e.target.value})}>
+                <option value="">Select client...</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>DATE</div>
+              <input type="date" value={form.date} onChange={e => setForm({...form, date:e.target.value})} />
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>AMOUNT ($)</div>
+              <input type="number" value={form.amount} onChange={e => setForm({...form, amount:e.target.value})} placeholder="0.00" />
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>PAYMENT METHOD</div>
+              <select value={form.payment_method} onChange={e => setForm({...form, payment_method:e.target.value})}>
+                <option value="cash_usd">💵 Cash USD</option>
+                <option value="wallet_usdt">💎 Wallet USDT</option>
+                <option value="bank_transfer">🏦 Bank Transfer</option>
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>REFERENCE #</div>
+              <input value={form.reference} onChange={e => setForm({...form, reference:e.target.value})} placeholder="Tx ID / Ref #" />
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>NOTES</div>
+              <input value={form.notes} onChange={e => setForm({...form, notes:e.target.value})} placeholder="Optional" />
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:10, marginTop:16 }}>
+            <Btn onClick={save} loading={saving} disabled={!form.client_id||!form.amount}>Save Receipt</Btn>
+            <Btn outline onClick={() => setShowAdd(false)}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ display:"flex", gap:12, marginBottom:20, flexWrap:"wrap" }}>
+        <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ width:"auto" }}>
+          <option value="">All Clients</option>
+          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select value={filterMethod} onChange={e => setFilterMethod(e.target.value)} style={{ width:"auto" }}>
+          <option value="">All Methods</option>
+          <option value="cash_usd">💵 Cash USD</option>
+          <option value="wallet_usdt">💎 Wallet USDT</option>
+          <option value="bank_transfer">🏦 Bank Transfer</option>
+        </select>
+      </div>
+
+      {loading ? <Loader /> : (
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
+          <table>
+            <thead><tr><th>ID</th><th>Date</th><th>Client</th><th>Method</th><th>Reference</th><th>Amount</th><th>Del</th></tr></thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.id}>
+                  <td style={{ fontFamily:T.mono, color:T.green, fontSize:11 }}>{r.id}</td>
+                  <td style={{ fontSize:12, color:T.muted }}>{r.date}</td>
+                  <td style={{ fontWeight:600 }}>{r.clientName}</td>
+                  <td><Badge color={pmColor[r.payment_method]}>{pmLabel[r.payment_method]}</Badge></td>
+                  <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{r.reference || "—"}</td>
+                  <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{fmt(r.amount)}</td>
+                  <td><button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button></td>
+                </tr>
+              ))}
+              {filtered.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No receipts found</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── PAYMENTS (Money to Suppliers) ───────────────────────────────────────────
+function PaymentsPage({ suppliers }) {
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [filterSupplier, setFilterSupplier] = useState("");
+  const [filterMethod, setFilterMethod] = useState("");
+  const [form, setForm] = useState({ supplier_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
+
+  const load = async () => {
+    const { data } = await supabase.from("payments").select("*, suppliers(name)").order("date", { ascending: false });
+    setPayments((data||[]).map(p => ({ ...p, supplierName: p.suppliers?.name || "—" })));
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    if (!form.amount || !form.supplier_id) return;
+    setSaving(true);
+    const id = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
+    await supabase.from("payments").insert({ ...form, id, amount: +form.amount, supplier_id: +form.supplier_id });
+    // Also record in supplier_payments for balance tracking
+    await supabase.from("supplier_payments").insert({ supplier_id: +form.supplier_id, date: form.date, amount: +form.amount, type: "payment", notes: form.notes, payment_method: form.payment_method, reference: form.reference });
+    setForm({ supplier_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
+    setShowAdd(false);
+    load();
+    setSaving(false);
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete this payment?")) return;
+    await supabase.from("payments").delete().eq("id", id);
+    load();
+  };
+
+  const filtered = payments.filter(p =>
+    (!filterSupplier || p.supplier_id === +filterSupplier) &&
+    (!filterMethod || p.payment_method === filterMethod)
+  );
+  const total = filtered.reduce((s,p) => s + +p.amount, 0);
+  const byCash = filtered.filter(p=>p.payment_method==="cash_usd").reduce((s,p)=>s+(+p.amount),0);
+  const byUsdt = filtered.filter(p=>p.payment_method==="wallet_usdt").reduce((s,p)=>s+(+p.amount),0);
+  const byBank = filtered.filter(p=>p.payment_method==="bank_transfer").reduce((s,p)=>s+(+p.amount),0);
+
+  return (
+    <div className="page">
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <h2 style={{ fontSize:28, fontWeight:800 }}>Payments</h2>
+          <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Money paid to suppliers</p>
+        </div>
+        <Btn onClick={() => setShowAdd(!showAdd)}>+ New Payment</Btn>
+      </div>
+
+      {/* Summary cards */}
+      <div className="stats-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:16, marginBottom:24 }}>
+        <StatCard label="Total Paid" value={fmt(total)} icon="💸" color={T.red} sub={`${filtered.length} payments`} />
+        <StatCard label="Cash USD" value={fmt(byCash)} icon="💵" color="#00ff9d" />
+        <StatCard label="Wallet USDT" value={fmt(byUsdt)} icon="💎" color="#00e5ff" />
+        <StatCard label="Bank Transfer" value={fmt(byBank)} icon="🏦" color="#ffcc00" />
+      </div>
+
+      {showAdd && (
+        <div style={{ background:T.card, border:`1px solid ${T.red}44`, borderRadius:12, padding:24, marginBottom:24 }}>
+          <h3 style={{ fontSize:14, fontWeight:700, marginBottom:16, color:T.red }}>New Payment</h3>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>SUPPLIER</div>
+              <select value={form.supplier_id} onChange={e => setForm({...form, supplier_id:e.target.value})}>
+                <option value="">Select supplier...</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>DATE</div>
+              <input type="date" value={form.date} onChange={e => setForm({...form, date:e.target.value})} />
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>AMOUNT ($)</div>
+              <input type="number" value={form.amount} onChange={e => setForm({...form, amount:e.target.value})} placeholder="0.00" />
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>PAYMENT METHOD</div>
+              <select value={form.payment_method} onChange={e => setForm({...form, payment_method:e.target.value})}>
+                <option value="cash_usd">💵 Cash USD</option>
+                <option value="wallet_usdt">💎 Wallet USDT</option>
+                <option value="bank_transfer">🏦 Bank Transfer</option>
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>REFERENCE #</div>
+              <input value={form.reference} onChange={e => setForm({...form, reference:e.target.value})} placeholder="Tx ID / Ref #" />
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>NOTES</div>
+              <input value={form.notes} onChange={e => setForm({...form, notes:e.target.value})} placeholder="Optional" />
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:10, marginTop:16 }}>
+            <Btn onClick={save} loading={saving} disabled={!form.supplier_id||!form.amount}>Save Payment</Btn>
+            <Btn outline onClick={() => setShowAdd(false)}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ display:"flex", gap:12, marginBottom:20, flexWrap:"wrap" }}>
+        <select value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)} style={{ width:"auto" }}>
+          <option value="">All Suppliers</option>
+          {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <select value={filterMethod} onChange={e => setFilterMethod(e.target.value)} style={{ width:"auto" }}>
+          <option value="">All Methods</option>
+          <option value="cash_usd">💵 Cash USD</option>
+          <option value="wallet_usdt">💎 Wallet USDT</option>
+          <option value="bank_transfer">🏦 Bank Transfer</option>
+        </select>
+      </div>
+
+      {loading ? <Loader /> : (
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
+          <table>
+            <thead><tr><th>ID</th><th>Date</th><th>Supplier</th><th>Method</th><th>Reference</th><th>Amount</th><th>Del</th></tr></thead>
+            <tbody>
+              {filtered.map(p => (
+                <tr key={p.id}>
+                  <td style={{ fontFamily:T.mono, color:T.red, fontSize:11 }}>{p.id}</td>
+                  <td style={{ fontSize:12, color:T.muted }}>{p.date}</td>
+                  <td style={{ fontWeight:600 }}>{p.supplierName}</td>
+                  <td><Badge color={pmColor[p.payment_method]}>{pmLabel[p.payment_method]}</Badge></td>
+                  <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{p.reference || "—"}</td>
+                  <td style={{ fontFamily:T.mono, color:T.red, fontWeight:700 }}>{fmt(p.amount)}</td>
+                  <td><button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button></td>
+                </tr>
+              ))}
+              {filtered.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No payments found</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── APP SHELL ────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("dashboard");
@@ -2119,8 +2415,10 @@ export default function App() {
     { id: "transfer", label: "Stock Transfer", icon: "🔄" },
     { id: "clients", label: "Clients", icon: "👤" },
     { id: "client-balance", label: "Client Balance", icon: "💳" },
+    { id: "receipts", label: "Receipts", icon: "🟢" },
     { id: "suppliers", label: "Suppliers", icon: "🏭" },
     { id: "supplier-balance", label: "Supplier Balance", icon: "💰" },
+    { id: "payments", label: "Payments", icon: "🔴" },
     { id: "orders", label: "Sales Orders", icon: "📋" },
     { id: "invoices", label: "Invoices", icon: "🧾" },
     { id: "expenses", label: "Expenses", icon: "💸" },
@@ -2165,7 +2463,8 @@ export default function App() {
               {page === "client-balance" && <ClientBalance clients={clients} invoices={invoices} onRefresh={loadData} />}
               {page === "suppliers" && <SuppliersPage suppliers={suppliers} onRefresh={loadData} />}
               {page === "supplier-balance" && <SupplierBalance suppliers={suppliers} invoices={invoices} onRefresh={loadData} />}
-              {page === "orders" && <SalesOrders products={products} locations={locations} invoices={invoices} setInvoices={setInvoices} onRefresh={loadData} />}
+              {page === "receipts" && <ReceiptsPage clients={clients} />}
+              {page === "payments" && <PaymentsPage suppliers={suppliers} />}
               {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} clients={clients} suppliers={suppliers} onRefresh={loadData} userProfile={userProfile} />}
               {page === "expenses" && <ExpensesPage locations={locations} onRefresh={loadData} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
