@@ -839,6 +839,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                 </div>
               </div>
             )}
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
               <div>
                 <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Date</div>
                 <input type="date" value={editInv.date} onChange={e => setEditInv({...editInv, date:e.target.value})} />
@@ -3116,4 +3118,3 @@ export default function App() {
     </>
   );
 }
- 
