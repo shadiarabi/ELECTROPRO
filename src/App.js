@@ -982,8 +982,19 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                   setItemForm({ ...itemForm, productId: e.target.value, customPrice: prod ? (newInv.type === "sell" ? prod.sell_price : prod.cost_price) : "" });
                 }}>
                   <option value="">Select product...</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+                  {products.map(p => {
+                    const stock = newInv.location_id ? (p.stockByLocation?.[+newInv.location_id] || 0) : p.totalStock;
+                    return <option key={p.id} value={p.id}>{p.name} ({p.sku}) — Stock: {stock}</option>;
+                  })}
                 </select>
+                {/* Show stock alert for selected product */}
+                {itemForm.productId && newInv.location_id && (() => {
+                  const prod = products.find(p => p.id === +itemForm.productId);
+                  const stock = prod?.stockByLocation?.[+newInv.location_id] || 0;
+                  return <div style={{ fontSize: 12, marginTop: 6, fontFamily: T.mono, color: stock < 3 ? T.red : stock < 8 ? T.yellow : T.green, fontWeight: 700 }}>
+                    📦 Available: {stock} units{stock === 0 ? " ⚠️ OUT OF STOCK" : stock < 5 ? " ⚠️ Low" : ""}
+                  </div>;
+                })()}
               </div>
               <div>
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>QTY</div>
@@ -1018,6 +1029,16 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: `2px solid ${T.border}`, background: T.accentDim }}>
+                    <td style={{ fontWeight: 700, color: T.accent }}>TOTALS</td>
+                    <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.accent }}>{newInv.items.reduce((s, i) => s + +i.qty, 0)} units</td>
+                    <td></td><td></td>
+                    <td></td>
+                    <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.green }}>{fmt(newInv.items.reduce((s, i) => s + i.qty * i.price, 0))}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}
