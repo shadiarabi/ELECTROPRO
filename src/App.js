@@ -387,6 +387,8 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
+  const [adjustStock, setAdjustStock] = useState(null); // { product, location_id, currentQty }
+  const [adjustForm, setAdjustForm] = useState({ newQty: "", reason: "correction", notes: "" });
   const [form, setForm] = useState({ name: "", sku: "", category: "", cost_price: "", sell_price: "" });
   const canEdit = ["admin", "manager"].includes(userProfile?.role);
 
@@ -423,6 +425,19 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
     setSaving(false);
   };
 
+  const saveAdjustment = async () => {
+    if (adjustForm.newQty === "" || !adjustStock) return;
+    setSaving(true);
+    await supabase.from("stock")
+      .update({ quantity: +adjustForm.newQty })
+      .eq("product_id", adjustStock.product.id)
+      .eq("location_id", adjustStock.location_id);
+    setAdjustStock(null);
+    setAdjustForm({ newQty: "", reason: "correction", notes: "" });
+    onRefresh();
+    setSaving(false);
+  };
+
   const deleteProduct = async (id) => {
     if (!window.confirm("Delete this product? This cannot be undone.")) return;
     await supabase.from("stock").delete().eq("product_id", id);
@@ -439,6 +454,57 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
         </div>
         {canEdit && <Btn onClick={() => setShowAdd(!showAdd)}>+ Add Product</Btn>}
       </div>
+
+      {/* Stock Adjustment Modal */}
+      {adjustStock && (
+        <div style={{ position:"fixed", inset:0, background:"#000a", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:T.card, border:`1px solid ${T.yellow}44`, borderRadius:16, padding:28, width:"100%", maxWidth:440 }}>
+            <h3 style={{ fontSize:16, fontWeight:700, marginBottom:6, color:T.yellow }}>📦 Adjust Stock</h3>
+            <p style={{ fontSize:13, color:T.muted, marginBottom:20 }}>
+              <strong style={{ color:T.text }}>{adjustStock.product.name}</strong> at <strong style={{ color:T.accent }}>{locations.find(l=>l.id===adjustStock.location_id)?.name}</strong>
+            </p>
+            <div style={{ background:T.surface, borderRadius:8, padding:12, marginBottom:16, display:"flex", justifyContent:"space-between" }}>
+              <span style={{ color:T.muted, fontSize:13 }}>Current Stock</span>
+              <span style={{ fontFamily:T.mono, fontWeight:700, color:adjustStock.currentQty<5?T.red:T.accent }}>{adjustStock.currentQty} units</span>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+              <div>
+                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>New Quantity</div>
+                <input type="number" value={adjustForm.newQty} onChange={e => setAdjustForm({...adjustForm, newQty:e.target.value})} placeholder="Enter new quantity" min="0" autoFocus />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Reason</div>
+                <select value={adjustForm.reason} onChange={e => setAdjustForm({...adjustForm, reason:e.target.value})}>
+                  <option value="correction">Stock Correction</option>
+                  <option value="damage">Damage / Loss</option>
+                  <option value="theft">Theft</option>
+                  <option value="return">Customer Return</option>
+                  <option value="initial">Initial Count</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div style={{ gridColumn:"1/-1" }}>
+                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Notes (optional)</div>
+                <input value={adjustForm.notes} onChange={e => setAdjustForm({...adjustForm, notes:e.target.value})} placeholder="e.g. Annual stock count" />
+              </div>
+            </div>
+            {adjustForm.newQty !== "" && (
+              <div style={{ background:T.accentDim, borderRadius:8, padding:12, marginBottom:16, fontFamily:T.mono, fontSize:13 }}>
+                <span style={{ color:T.muted }}>Change: </span>
+                <span style={{ color:+adjustForm.newQty > adjustStock.currentQty ? T.green : T.red, fontWeight:700 }}>
+                  {+adjustForm.newQty > adjustStock.currentQty ? "+" : ""}{+adjustForm.newQty - adjustStock.currentQty} units
+                </span>
+                <span style={{ color:T.muted }}> → New total: </span>
+                <span style={{ color:T.accent, fontWeight:700 }}>{adjustForm.newQty} units</span>
+              </div>
+            )}
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn onClick={saveAdjustment} loading={saving} disabled={adjustForm.newQty === ""}>Save Adjustment</Btn>
+              <Btn outline onClick={() => { setAdjustStock(null); setAdjustForm({ newQty:"", reason:"correction", notes:"" }); }}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Modal */}
       {editProduct && (
@@ -479,6 +545,7 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
         </div>
       )}
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search products..." style={{ marginBottom: 20 }} />
+      {canEdit && <div style={{ fontSize:12, color:T.muted, marginBottom:12 }}>💡 Click any stock number to adjust it</div>}
       <div style={{ overflowX: "auto" }}>
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", minWidth: 600 }}>
           <table>
@@ -503,7 +570,13 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
                     <td className="hide-mobile"><span style={{ color: +margin > 20 ? T.green : T.yellow, fontFamily: T.mono }}>{margin}%</span></td>
                     {locations.map(l => {
                       const s = p.stockByLocation?.[l.id] || 0;
-                      return <td key={l.id} className="hide-mobile" style={{ textAlign: "center", fontFamily: T.mono, color: s < 3 ? T.red : s < 8 ? T.yellow : T.text }}>{s}</td>;
+                      return (
+                        <td key={l.id} className="hide-mobile" style={{ textAlign:"center", padding:"8px 6px" }}>
+                          <button onClick={() => canEdit && setAdjustStock({ product:p, location_id:l.id, currentQty:s })} style={{ background: canEdit ? (s<3?T.red+"22":s<8?T.yellow+"22":T.accentDim) : "none", border: canEdit ? `1px solid ${s<3?T.red:s<8?T.yellow:T.accent}44` : "none", borderRadius:6, padding:"3px 10px", color:s<3?T.red:s<8?T.yellow:T.text, fontFamily:T.mono, fontSize:13, fontWeight:700, cursor:canEdit?"pointer":"default", transition:"all .15s" }}>
+                            {s}
+                          </button>
+                        </td>
+                      );
                     })}
                     <td style={{ fontWeight: 700, fontFamily: T.mono, color: T.accent }}>{p.totalStock || 0}</td>
                     {canEdit && <td>
