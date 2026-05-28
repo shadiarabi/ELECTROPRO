@@ -665,20 +665,19 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       await supabase.from("invoice_items").insert(items);
       // Update stock for each item
       for (const item of newInv.items) {
-        const productId = +item.productId;
-        const locationId = +newInv.location_id;
-        const qty = +item.qty;
-        const { data: stockRow, error: stockErr } = await supabase.from("stock").select("id, quantity").eq("product_id", productId).eq("location_id", locationId).single();
-        if (stockRow && !stockErr) {
+        const productId = parseInt(item.productId, 10);
+        const locationId = parseInt(newInv.location_id, 10);
+        const qty = parseInt(item.qty, 10);
+        if (isNaN(productId) || isNaN(locationId) || isNaN(qty)) continue;
+        const { data: rows } = await supabase.from("stock").select("id, quantity").eq("product_id", productId).eq("location_id", locationId);
+        const stockRow = rows && rows[0];
+        if (stockRow) {
           const newQty = newInv.type === "sell"
             ? Math.max(0, stockRow.quantity - qty)
             : stockRow.quantity + qty;
           await supabase.from("stock").update({ quantity: newQty }).eq("id", stockRow.id);
-        } else {
-          // Stock row doesn't exist yet — create it (for purchases only)
-          if (newInv.type === "buy") {
-            await supabase.from("stock").insert({ product_id: productId, location_id: locationId, quantity: qty });
-          }
+        } else if (newInv.type === "buy") {
+          await supabase.from("stock").insert({ product_id: productId, location_id: locationId, quantity: qty });
         }
       }
       setShowCreate(false);
