@@ -660,13 +660,24 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       supplier_id: newInv.supplier_id ? +newInv.supplier_id : null,
     });
     if (!invErr) {
-      const items = newInv.items.map(i => ({ invoice_id: invId, product_id: i.productId, product_name: i.name, quantity: i.qty, price: i.price, original_price: i.originalPrice, discount_pct: i.discountPct, cost: i.cost }));
+      const items = newInv.items.map(i => ({ invoice_id: invId, product_id: +i.productId, product_name: i.name, quantity: +i.qty, price: i.price, original_price: i.originalPrice || i.price, discount_pct: i.discountPct || 0, cost: i.cost }));
       await supabase.from("invoice_items").insert(items);
+      // Update stock for each item
       for (const item of newInv.items) {
-        const { data: stockRow } = await supabase.from("stock").select("quantity").eq("product_id", item.productId).eq("location_id", newInv.location_id).single();
-        if (stockRow) {
-          const delta = newInv.type === "sell" ? -item.qty : +item.qty;
-          await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity + delta) }).eq("product_id", item.productId).eq("location_id", newInv.location_id);
+        const productId = +item.productId;
+        const locationId = +newInv.location_id;
+        const qty = +item.qty;
+        const { data: stockRow, error: stockErr } = await supabase.from("stock").select("id, quantity").eq("product_id", productId).eq("location_id", locationId).single();
+        if (stockRow && !stockErr) {
+          const newQty = newInv.type === "sell"
+            ? Math.max(0, stockRow.quantity - qty)
+            : stockRow.quantity + qty;
+          await supabase.from("stock").update({ quantity: newQty }).eq("id", stockRow.id);
+        } else {
+          // Stock row doesn't exist yet — create it (for purchases only)
+          if (newInv.type === "buy") {
+            await supabase.from("stock").insert({ product_id: productId, location_id: locationId, quantity: qty });
+          }
         }
       }
       setShowCreate(false);
@@ -950,10 +961,10 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                         const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
                         if (items) {
                           for (const item of items) {
-                            const { data: stockRow } = await supabase.from("stock").select("quantity").eq("product_id", item.product_id).eq("location_id", inv.location_id).single();
-                            if (stockRow) {
+                            const { data: stockRow, error: sErr } = await supabase.from("stock").select("id, quantity").eq("product_id", +item.product_id).eq("location_id", +inv.location_id).single();
+                            if (stockRow && !sErr) {
                               const delta = inv.type === "sell" ? +item.quantity : -item.quantity;
-                              await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity + delta) }).eq("product_id", item.product_id).eq("location_id", inv.location_id);
+                              await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity + delta) }).eq("id", stockRow.id);
                             }
                           }
                         }
@@ -1297,17 +1308,17 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
     const invId = "INV-" + Math.random().toString(36).slice(2, 8).toUpperCase();
     const { error } = await supabase.from("invoices").insert({
       id: invId, type: "sell", date: order.date,
-      location_id: order.location_id, customer: order.customer, status: "paid"
+      location_id: order.location_id, customer: order.customer, status: "paid", payment_status: "paid"
     });
     if (!error) {
       await supabase.from("invoice_items").insert(
-        order.items.map(i => ({ invoice_id: invId, product_id: i.product_id, product_name: i.product_name, quantity: i.quantity, price: i.price, cost: i.cost }))
+        order.items.map(i => ({ invoice_id: invId, product_id: +i.product_id, product_name: i.product_name, quantity: +i.quantity, price: i.price, cost: i.cost }))
       );
-      // Deduct stock
+      // Deduct stock using id-based update
       for (const item of order.items) {
-        const { data: stockRow } = await supabase.from("stock").select("quantity").eq("product_id", item.product_id).eq("location_id", order.location_id).single();
-        if (stockRow) {
-          await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity - item.quantity) }).eq("product_id", item.product_id).eq("location_id", order.location_id);
+        const { data: stockRow, error: sErr } = await supabase.from("stock").select("id, quantity").eq("product_id", +item.product_id).eq("location_id", +order.location_id).single();
+        if (stockRow && !sErr) {
+          await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity - +item.quantity) }).eq("id", stockRow.id);
         }
       }
       await supabase.from("sales_orders").update({ status: "invoiced" }).eq("id", order.id);
