@@ -326,23 +326,28 @@ function PrintInvoice({ inv, locations, onClose }) {
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function Dashboard({ invoices, products, locations, userProfile }) {
-  const sells = invoices.filter(i => i.type === "sell" && i.status === "paid");
-  const sellsPending = invoices.filter(i => i.type === "sell" && (i.status === "pending" || i.status === "partial"));
-  const allSells = invoices.filter(i => i.type === "sell");
-  const buys = invoices.filter(i => i.type === "buy" && i.status === "paid");
-  const buysPending = invoices.filter(i => i.type === "buy" && (i.status === "pending" || i.status === "partial"));
-  const revenue = sells.reduce((s, i) => s + i.total, 0);
-  const revenuePending = sellsPending.reduce((s, i) => s + i.total - (i.amount_paid || 0), 0);
-  const cogs = sells.reduce((s, i) => s + i.cogs, 0);
-  const cogsPending = sellsPending.reduce((s, i) => s + i.cogs, 0);
+  // Use payment_status as primary, fall back to status
+  const getStatus = i => i.payment_status || i.status || "pending";
+  const sells = invoices.filter(i => i.type === "sell");
+  const buys = invoices.filter(i => i.type === "buy");
+  const paidSells = sells.filter(i => getStatus(i) === "paid");
+  const pendingSells = sells.filter(i => getStatus(i) !== "paid");
+  const paidBuys = buys.filter(i => getStatus(i) === "paid");
+  const pendingBuys = buys.filter(i => getStatus(i) !== "paid");
+
+  const revenue = paidSells.reduce((s, i) => s + i.total, 0);
+  const revenuePending = pendingSells.reduce((s, i) => s + i.total, 0);
+  const revenueCollected = pendingSells.reduce((s, i) => s + (i.amount_paid || 0), 0);
+  const revenueStillDue = revenuePending - revenueCollected;
+  const cogs = paidSells.reduce((s, i) => s + i.cogs, 0);
+  const cogsPending = pendingSells.reduce((s, i) => s + i.cogs, 0);
   const profit = revenue - cogs;
-  const expectedRevenue = allSells.reduce((s, i) => s + i.total, 0);
-  const expectedCogs = allSells.reduce((s, i) => s + i.cogs, 0);
+  const expectedRevenue = sells.reduce((s, i) => s + i.total, 0);
+  const expectedCogs = sells.reduce((s, i) => s + i.cogs, 0);
   const expectedProfit = expectedRevenue - expectedCogs;
-  const purchasesPaid = buys.reduce((s, i) => s + i.total, 0);
-  const purchasesPending = buysPending.reduce((s, i) => s + i.total - (i.amount_paid || 0), 0);
+  const purchasesPaid = paidBuys.reduce((s, i) => s + i.total, 0);
+  const purchasesPending = pendingBuys.reduce((s, i) => s + i.total - (i.amount_paid || 0), 0);
   const totalItems = products.reduce((s, p) => s + (p.totalStock || 0), 0);
-  const maxRev = Math.max(...locations.map(l => l.revenue || 0), 1);
   const canSeeFinancials = ["admin", "manager"].includes(userProfile?.role);
 
   return (
@@ -353,22 +358,23 @@ function Dashboard({ invoices, products, locations, userProfile }) {
         <span style={{ marginLeft: 8 }}><Badge color={userProfile?.role === "admin" ? T.red : userProfile?.role === "manager" ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></span>
       </p>
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} />}
-        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending sales`} />}
+        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${paidSells.length} paid sales`} />}
+        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${pendingSells.length} pending sales`} />}
+        {canSeeFinancials && <StatCard label="Still Due" value={fmt(revenueStillDue)} icon="🔔" color={T.red} sub="Not yet collected" />}
         {canSeeFinancials && <StatCard label="Net Profit (Paid)" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} />}
-        {canSeeFinancials && <StatCard label="Expected Profit" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit >= 0 ? T.accent : T.red} sub={`All invoices incl. pending`} />}
-        {canSeeFinancials && <StatCard label="Paid Purchases" value={fmt(purchasesPaid)} icon="✅" color={T.green} sub={`${buys.length} paid`} />}
-        {canSeeFinancials && <StatCard label="Pending Purchases" value={fmt(purchasesPending)} icon="🔴" color={T.red} sub={`${buysPending.length} pending`} />}
+        {canSeeFinancials && <StatCard label="Expected Profit" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit >= 0 ? T.accent : T.red} sub="All invoices incl. pending" />}
+        {canSeeFinancials && <StatCard label="Paid Purchases" value={fmt(purchasesPaid)} icon="✅" color={T.green} sub={`${paidBuys.length} paid`} />}
+        {canSeeFinancials && <StatCard label="Pending Purchases" value={fmt(purchasesPending)} icon="🔴" color={T.red} sub={`${pendingBuys.length} pending`} />}
         <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} />
       </div>
 
-      {canSeeFinancials && revenuePending > 0 && (
+      {canSeeFinancials && revenueStillDue > 0 && (
         <div style={{ background: T.yellow+"11", border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.yellow }}>⏳ Pending Collections from Clients</div>
-            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{sellsPending.length} unpaid sales invoices</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{pendingSells.length} unpaid/partial sales — collected {fmt(revenueCollected)} so far</div>
           </div>
-          <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: T.yellow }}>{fmt(revenuePending)}</div>
+          <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: T.yellow }}>{fmt(revenueStillDue)} still due</div>
         </div>
       )}
 
@@ -376,7 +382,7 @@ function Dashboard({ invoices, products, locations, userProfile }) {
         <div style={{ background: T.red+"11", border: `1px solid ${T.red}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.red }}>🔴 Pending Payments to Suppliers</div>
-            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{buysPending.length} unpaid purchase invoices</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{pendingBuys.length} unpaid purchase invoices</div>
           </div>
           <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: T.red }}>{fmt(purchasesPending)}</div>
         </div>
@@ -413,13 +419,15 @@ function Dashboard({ invoices, products, locations, userProfile }) {
             <h3 style={{ fontSize: 13, letterSpacing: 2, textTransform: "uppercase", color: T.muted, marginBottom: 20 }}>P&L Summary</h3>
             {[
               { label: "Paid Revenue", val: revenue, color: T.green },
-              { label: "Pending Revenue", val: revenuePending, color: T.yellow },
+              { label: "Pending Revenue (Total)", val: revenuePending, color: T.yellow },
+              { label: "Already Collected (Partial)", val: revenueCollected, color: T.green },
+              { label: "Still Due from Clients", val: revenueStillDue, color: T.yellow },
               { label: "Expected Total Revenue", val: expectedRevenue, color: T.accent, bold: true },
-              { label: "Cost of Goods Sold (Paid)", val: -cogs, color: T.red },
-              { label: "Cost of Goods Sold (Pending)", val: -cogsPending, color: T.red },
+              { label: "Cost of Goods (Paid Sales)", val: -cogs, color: T.red },
+              { label: "Cost of Goods (Pending Sales)", val: -cogsPending, color: T.red },
               { label: "Net Profit (Paid Only)", val: profit, color: profit >= 0 ? T.green : T.red, bold: true },
               { label: "Expected Profit (All)", val: expectedProfit, color: expectedProfit >= 0 ? T.accent : T.red, bold: true },
-              { label: "Pending Purchases Due", val: -purchasesPending, color: T.red },
+              { label: "Still Owed to Suppliers", val: -purchasesPending, color: T.red },
             ].map((row, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
                 <span style={{ fontSize: 13, color: row.bold ? T.text : T.muted, fontWeight: row.bold ? 700 : 400 }}>{row.label}</span>
@@ -3174,8 +3182,8 @@ export default function App() {
     });
     const locsWithRevenue = locsData.map(l => {
       const locAllSells = invsData.filter(i => i.location_id === l.id && i.type === "sell");
-      const locPaidSells = locAllSells.filter(i => i.status === "paid");
-      const locPendingSells = locAllSells.filter(i => i.status !== "paid");
+      const locPaidSells = locAllSells.filter(i => (i.payment_status || i.status) === "paid");
+      const locPendingSells = locAllSells.filter(i => (i.payment_status || i.status) !== "paid");
       return {
         ...l,
         revenue: locPaidSells.reduce((s, i) => s + i.total, 0),
