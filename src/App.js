@@ -28,10 +28,8 @@ const css = `
   .spinner { width:32px; height:32px; border:3px solid ${T.border}; border-top-color:${T.accent}; border-radius:50%; animation:spin .8s linear infinite; }
   @media print {
     .no-print { display: none !important; }
-    body { background: white !important; color: black !important; margin: 0 !important; }
-    .print-invoice-overlay { position: static !important; background: none !important; display: block !important; }
-    .print-invoice-content { box-shadow: none !important; max-height: none !important; overflow: visible !important; border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
-    .print-invoice-buttons { display: none !important; }
+    body { background: white; color: black; }
+    .print-invoice { display: block !important; }
   }
   @media (max-width: 768px) {
     .sidebar { width: 60px !important; }
@@ -257,14 +255,74 @@ function UsersPage({ currentUser }) {
 function PrintInvoice({ inv, locations, onClose }) {
   const loc = locations.find(l => l.id === inv.location_id);
   const total = inv.total || 0;
-  const profit = inv.profit || 0;
+  const subtotal = (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0);
+  const discountAmt = inv.discount_value > 0 ? (inv.discount_type === "pct" ? subtotal * inv.discount_value / 100 : inv.discount_value) : 0;
+  const shipAmt = inv.shipment_value > 0 ? (inv.shipment_type === "pct" ? subtotal * inv.shipment_value / 100 : inv.shipment_value) : 0;
+  const pmLabel = { cash_usd: "💵 Cash USD", wallet_usdt: "💎 Wallet USDT", bank_transfer: "🏦 Bank Transfer" };
 
-  const print = () => window.print();
+  const print = () => {
+    const html = `<!DOCTYPE html><html><head><title>Invoice ${inv.id}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; }
+      h1 { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+      .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 16px; margin-bottom: 16px; }
+      .right { text-align: right; }
+      .title { font-size: 18px; font-weight: 800; }
+      .sub { font-size: 13px; color: #666; margin-top: 4px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+      th { text-align: left; padding: 8px 0; font-size: 12px; border-bottom: 2px solid #000; }
+      th:not(:first-child) { text-align: right; }
+      td { padding: 10px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      td:not(:first-child) { text-align: right; }
+      .totals { display: flex; justify-content: flex-end; }
+      .totals-box { width: 240px; border-top: 2px solid #000; padding-top: 12px; }
+      .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+      .row.total { font-size: 16px; font-weight: 800; border-top: 2px solid #000; margin-top: 8px; padding-top: 8px; }
+      .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; text-align: center; font-size: 11px; color: #999; }
+      .strike { text-decoration: line-through; color: #999; font-size: 11px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="header">
+        <div><div class="title">${inv.type === "sell" ? "SALES INVOICE" : "PURCHASE INVOICE"}</div><div class="sub">#${inv.id}</div></div>
+        <div class="right">
+          <div style="font-size:13px">Date: <strong>${inv.date}</strong></div>
+          <div style="font-size:13px">Location: <strong>${loc?.name || ""}</strong></div>
+          <div style="font-size:13px">${inv.type === "sell" ? "Customer" : "Supplier"}: <strong>${inv.customer}</strong></div>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Product</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Disc</th><th style="text-align:right">Total</th></tr></thead>
+        <tbody>
+          ${(inv.invoice_items || []).map(item => `<tr>
+            <td>${item.product_name}</td>
+            <td style="text-align:right">${item.quantity}</td>
+            <td style="text-align:right">${item.discount_pct > 0 ? `<span class="strike">$${Number(item.original_price||item.price).toFixed(2)}</span><br>` : ""}$${Number(item.price).toFixed(2)}</td>
+            <td style="text-align:right;color:red">${item.discount_pct > 0 ? item.discount_pct + "%" : "—"}</td>
+            <td style="text-align:right;font-weight:700">$${Number(item.quantity * item.price).toFixed(2)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+      <div class="totals"><div class="totals-box">
+        <div class="row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
+        ${discountAmt > 0 ? `<div class="row" style="color:red"><span>Discount${inv.discount_type==="pct"?` (${inv.discount_value}%)`:""}</span><span>−$${discountAmt.toFixed(2)}</span></div>` : ""}
+        ${shipAmt > 0 ? `<div class="row" style="color:#0066cc"><span>Shipment${inv.shipment_type==="pct"?` (${inv.shipment_value}%)`:""}</span><span>+$${shipAmt.toFixed(2)}</span></div>` : ""}
+        <div class="row total"><span>TOTAL</span><span>$${Number(total).toFixed(2)}</span></div>
+        ${inv.payment_method ? `<div class="row"><span>Payment</span><span>${{cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[inv.payment_method]||""}</span></div>` : ""}
+        ${inv.payment_reference ? `<div class="row"><span>Reference</span><span>${inv.payment_reference}</span></div>` : ""}
+      </div></div>
+      <div class="footer">Thank you for your business! • ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=700,height=900");
+    w.document.write(html);
+    w.document.close();
+  };
 
   return (
-    <div className="print-invoice-overlay" style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div className="print-invoice-content" style={{ background: "white", color: "#000", borderRadius: 12, padding: 40, width: "100%", maxWidth: 600, maxHeight: "90vh", overflow: "auto" }}>
-        <div className="print-invoice-buttons" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} className="no-print">
+      <div style={{ background: "white", color: "#000", borderRadius: 12, padding: 40, width: "100%", maxWidth: 600, maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h2 style={{ fontSize: 22, fontWeight: 800 }}>⚡ ElectroPro</h2>
           <div style={{ display: "flex", gap: 10 }}>
             <Btn small onClick={print} color="#000">🖨️ Print</Btn>
@@ -312,18 +370,18 @@ function PrintInvoice({ inv, locations, onClose }) {
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <div style={{ width: 220 }}>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13 }}>
-                <span>Subtotal</span><span>{fmt((inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0))}</span>
+                <span>Subtotal</span><span>{fmt(subtotal)}</span>
               </div>
-              {inv.discount_value > 0 && (
+              {discountAmt > 0 && (
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "red" }}>
                   <span>Discount {inv.discount_type === "pct" ? `(${inv.discount_value}%)` : ""}</span>
-                  <span>− {fmt(inv.discount_type === "pct" ? (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0) * inv.discount_value / 100 : inv.discount_value)}</span>
+                  <span>− {fmt(discountAmt)}</span>
                 </div>
               )}
-              {inv.shipment_value > 0 && (
+              {shipAmt > 0 && (
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#0066cc" }}>
                   <span>🚢 Shipment {inv.shipment_type === "pct" ? `(${inv.shipment_value}%)` : ""}</span>
-                  <span>+ {fmt(inv.shipment_type === "pct" ? (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0) * inv.shipment_value / 100 : inv.shipment_value)}</span>
+                  <span>+ {fmt(shipAmt)}</span>
                 </div>
               )}
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 16, fontWeight: 800, borderTop: "2px solid #000", marginTop: 8 }}>
@@ -331,10 +389,7 @@ function PrintInvoice({ inv, locations, onClose }) {
               </div>
               {inv.payment_method && (
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, marginTop: 4, color: "#333" }}>
-                  <span>Payment Method</span>
-                  <span style={{ fontWeight: 700 }}>
-                    {inv.payment_method === "cash_usd" ? "💵 Cash USD" : inv.payment_method === "wallet_usdt" ? "💎 Wallet USDT" : "🏦 Bank Transfer"}
-                  </span>
+                  <span>Payment</span><span style={{ fontWeight: 700 }}>{pmLabel[inv.payment_method] || ""}</span>
                 </div>
               )}
               {inv.payment_reference && (
@@ -3128,7 +3183,7 @@ export default function App() {
   return (
     <>
       <style>{css}</style>
-      <div className="no-print" style={{ display: "flex", minHeight: "100vh" }}>
+      <div style={{ display: "flex", minHeight: "100vh" }}>
         <nav className="sidebar no-print" style={{ width: sidebarWidth, minWidth: 60, maxWidth: 320, background: T.surface, borderRight: `1px solid ${T.border}`, padding: "28px 0", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, transition: "none", overflowY: "auto", overflowX: "hidden" }}>
           <div style={{ padding: "0 16px 28px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.5, whiteSpace: "nowrap", overflow: "hidden" }}>
