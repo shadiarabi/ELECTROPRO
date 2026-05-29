@@ -387,11 +387,8 @@ function Dashboard({ invoices, products, locations, userProfile }) {
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
         {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${paidSells.length} paid sales`} />}
         {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${pendingSells.length} pending sales`} />}
-        {canSeeFinancials && <StatCard label="Still Due" value={fmt(revenueStillDue)} icon="🔔" color={T.red} sub="Not yet collected" />}
         {canSeeFinancials && <StatCard label="Net Profit (Paid)" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} />}
         {canSeeFinancials && <StatCard label="Expected Profit" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit >= 0 ? T.accent : T.red} sub="All invoices incl. pending" />}
-        {canSeeFinancials && <StatCard label="Paid Purchases" value={fmt(purchasesPaid)} icon="✅" color={T.green} sub={`${paidBuys.length} paid`} />}
-        {canSeeFinancials && <StatCard label="Pending Purchases" value={fmt(purchasesPending)} icon="🔴" color={T.red} sub={`${pendingBuys.length} pending`} />}
         <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} />
       </div>
 
