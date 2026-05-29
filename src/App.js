@@ -785,7 +785,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const [saving, setSaving] = useState(false);
   const [printInv, setPrintInv] = useState(null);
   const [editInv, setEditInv] = useState(null);
-  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
+  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
   const filtered = filterByDate(invoices, datePeriod)
@@ -849,8 +849,22 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
           }
         }
       }
+
+      // Distribute shipment fees to product cost prices (purchase only)
+      if (newInv.type === "buy" && newInv.distributeShipment && shipmentAmt > 0) {
+        const totalItemValue = newInv.items.reduce((s, i) => s + +i.qty * i.price, 0);
+        if (totalItemValue > 0) {
+          await Promise.all(newInv.items.map(async item => {
+            const itemValue = +item.qty * item.price;
+            const share = shipmentAmt * (itemValue / totalItemValue);
+            const extraPerUnit = share / +item.qty;
+            const newCost = item.cost + extraPerUnit;
+            await supabase.from("products").update({ cost_price: +newCost.toFixed(4) }).eq("id", +item.productId);
+          }));
+        }
+      }
       setShowCreate(false);
-      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
+      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
       onRefresh();
     }
     setSaving(false);
@@ -1092,6 +1106,24 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                 <input type="number" value={newInv.shipmentValue} onChange={e => setNewInv({ ...newInv, shipmentValue: e.target.value })} placeholder="0" style={{ width: 120 }} min="0" />
                 {shipmentAmt > 0 && <span style={{ fontFamily: T.mono, fontSize: 13, color: T.accent }}>+ {fmt(shipmentAmt)} shipment</span>}
               </div>
+              {newInv.type === "buy" && shipmentAmt > 0 && (
+                <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, background: T.card, borderRadius: 8, padding: "10px 14px", border: `1px solid ${newInv.distributeShipment ? T.yellow+"66" : T.border}` }}>
+                  <input type="checkbox" id="distShip" checked={newInv.distributeShipment} onChange={e => setNewInv({ ...newInv, distributeShipment: e.target.checked })} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                  <label htmlFor="distShip" style={{ fontSize: 13, color: newInv.distributeShipment ? T.yellow : T.muted, cursor: "pointer", fontWeight: newInv.distributeShipment ? 700 : 400 }}>
+                    📦 Distribute {fmt(shipmentAmt)} shipping cost to product cost prices
+                  </label>
+                  {newInv.distributeShipment && (
+                    <div style={{ marginLeft: "auto", fontSize: 11, color: T.muted }}>
+                      {newInv.items.map(item => {
+                        const itemValue = +item.qty * item.price;
+                        const total = newInv.items.reduce((s,i) => s + +i.qty * i.price, 0);
+                        const share = total > 0 ? shipmentAmt * (itemValue / total) / +item.qty : 0;
+                        return <div key={item.productId}>{item.name}: +{fmt(share)}/unit</div>;
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
