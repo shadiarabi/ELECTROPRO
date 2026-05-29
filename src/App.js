@@ -1578,7 +1578,7 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
   const [saving, setSaving] = useState(false);
   const [converting, setConverting] = useState(null);
   const [newOrder, setNewOrder] = useState({ location_id: "", customer: "", date: new Date().toISOString().slice(0, 10), notes: "", items: [] });
-  const [itemForm, setItemForm] = useState({ productId: "", qty: 1 });
+  const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -1597,8 +1597,11 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
   const addItem = () => {
     const prod = products.find(p => p.id === +itemForm.productId);
     if (!prod) return;
-    setNewOrder({ ...newOrder, items: [...newOrder.items, { productId: prod.id, name: prod.name, qty: +itemForm.qty, price: prod.sell_price, cost: prod.cost_price }] });
-    setItemForm({ productId: "", qty: 1 });
+    const basePrice = itemForm.customPrice !== "" ? +itemForm.customPrice : prod.sell_price;
+    const discPct = +itemForm.discountPct || 0;
+    const finalPrice = basePrice * (1 - discPct / 100);
+    setNewOrder({ ...newOrder, items: [...newOrder.items, { productId: prod.id, name: prod.name, qty: +itemForm.qty, price: finalPrice, originalPrice: basePrice, discountPct: discPct, cost: prod.cost_price }] });
+    setItemForm({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
   };
 
   const saveOrder = async () => {
@@ -1706,33 +1709,50 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
           <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ flex: 2, minWidth: 160 }}>
               <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRODUCT</div>
-              <select value={itemForm.productId} onChange={e => setItemForm({ ...itemForm, productId: e.target.value })}>
+              <select value={itemForm.productId} onChange={e => {
+                const prod = products.find(p => p.id === +e.target.value);
+                setItemForm({ ...itemForm, productId: e.target.value, customPrice: prod ? prod.sell_price : "" });
+              }}>
                 <option value="">Select product...</option>
                 {products.map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.sell_price)}</option>)}
               </select>
             </div>
-            <div style={{ width: 80 }}>
+            <div style={{ width: 70 }}>
               <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>QTY</div>
               <input type="number" value={itemForm.qty} onChange={e => setItemForm({ ...itemForm, qty: e.target.value })} min="1" />
+            </div>
+            <div style={{ width: 120 }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRICE ($)</div>
+              <input type="number" value={itemForm.customPrice} onChange={e => setItemForm({ ...itemForm, customPrice: e.target.value })} placeholder="Default" min="0" />
+            </div>
+            <div style={{ width: 90 }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DISC (%)</div>
+              <input type="number" value={itemForm.discountPct} onChange={e => setItemForm({ ...itemForm, discountPct: e.target.value })} placeholder="0" min="0" max="100" />
             </div>
             <Btn small onClick={addItem} disabled={!itemForm.productId}>Add</Btn>
           </div>
           {newOrder.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
               <table>
-                <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
+                <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Disc</th><th>Total</th><th></th></tr></thead>
                 <tbody>
                   {newOrder.items.map((item, i) => (
                     <tr key={i}>
                       <td>{item.name}</td>
                       <td style={{ fontFamily: T.mono }}>{item.qty}</td>
-                      <td style={{ fontFamily: T.mono }}>{fmt(item.price)}</td>
+                      <td style={{ fontFamily: T.mono }}>
+                        {item.discountPct > 0 && <span style={{ textDecoration: "line-through", color: T.muted, fontSize: 11, marginRight: 4 }}>{fmt(item.originalPrice || item.price)}</span>}
+                        {fmt(item.price)}
+                      </td>
+                      <td style={{ fontFamily: T.mono, color: T.yellow }}>{item.discountPct > 0 ? `${item.discountPct}%` : "—"}</td>
                       <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(item.qty * item.price)}</td>
+                      <td><button onClick={() => setNewOrder({ ...newOrder, items: newOrder.items.filter((_, j) => j !== i) })} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 4, padding: "2px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>✕</button></td>
                     </tr>
                   ))}
                   <tr>
-                    <td colSpan={3} style={{ textAlign: "right", fontWeight: 700 }}>Total</td>
+                    <td colSpan={4} style={{ textAlign: "right", fontWeight: 700 }}>Total</td>
                     <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.accent }}>{fmt(newOrder.items.reduce((s, i) => s + i.qty * i.price, 0))}</td>
+                    <td></td>
                   </tr>
                 </tbody>
               </table>
