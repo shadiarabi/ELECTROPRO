@@ -3107,6 +3107,116 @@ function PaymentsPage({ suppliers }) {
   );
 }
 
+// ─── BSM PROFIT ───────────────────────────────────────────────────────────────
+function BSMProfit({ invoices, suppliers }) {
+  const [filterSupplier, setFilterSupplier] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  // Only purchase invoices that have a remaining balance
+  const purchases = invoices.filter(i => {
+    if (i.type !== "buy") return false;
+    const remaining = i.total - (i.amount_paid || 0);
+    if (remaining <= 0) return false;
+    if (filterSupplier && i.supplier_id !== +filterSupplier) return false;
+    if (dateFrom && i.date < dateFrom) return false;
+    if (dateTo && i.date > dateTo) return false;
+    return true;
+  });
+
+  const totalProfit = purchases.reduce((s, i) => s + (i.total - (i.amount_paid || 0)), 0);
+  const totalPurchases = purchases.reduce((s, i) => s + i.total, 0);
+  const totalPaid = purchases.reduce((s, i) => s + (i.amount_paid || 0), 0);
+
+  const getSupplierName = (id) => suppliers.find(s => s.id === id)?.name || "—";
+
+  return (
+    <div className="page">
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <h2 style={{ fontSize:28, fontWeight:800 }}>🏢 BSM Profit</h2>
+          <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Profit from purchase invoice remaining balances</p>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:16, marginBottom:24 }}>
+        <StatCard label="BSM Profit" value={fmt(totalProfit)} icon="💎" color={T.green} sub="Total remaining balances" />
+        <StatCard label="Total Purchases" value={fmt(totalPurchases)} icon="🛒" color={T.accent} sub={`${purchases.length} invoices`} />
+        <StatCard label="Total Paid" value={fmt(totalPaid)} icon="✅" color={T.yellow} sub="Paid to suppliers" />
+        <StatCard label="Profit %" value={`${totalPurchases > 0 ? ((totalProfit/totalPurchases)*100).toFixed(1) : 0}%`} icon="📊" color={T.green} sub="Of total purchases" />
+      </div>
+
+      {/* Filters */}
+      <div style={{ display:"flex", gap:12, marginBottom:20, flexWrap:"wrap" }}>
+        <select value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)} style={{ width:"auto" }}>
+          <option value="">All Suppliers</option>
+          {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ fontSize:11, color:T.muted }}>FROM</div>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width:"auto" }} />
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ fontSize:11, color:T.muted }}>TO</div>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width:"auto" }} />
+        </div>
+        {(filterSupplier || dateFrom || dateTo) && (
+          <button onClick={() => { setFilterSupplier(""); setDateFrom(""); setDateTo(""); }} style={{ background:"none", border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 12px", color:T.muted, fontSize:12, cursor:"pointer" }}>✕ Clear</button>
+        )}
+      </div>
+
+      {/* Invoice table */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Invoice</th>
+              <th>Date</th>
+              <th>Supplier</th>
+              <th>Invoice Total</th>
+              <th>Paid</th>
+              <th style={{ color:T.green }}>BSM Profit</th>
+              <th>Profit %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {purchases.map(inv => {
+              const remaining = inv.total - (inv.amount_paid || 0);
+              const pct = inv.total > 0 ? ((remaining / inv.total) * 100).toFixed(1) : 0;
+              return (
+                <tr key={inv.id}>
+                  <td style={{ fontFamily:T.mono, color:T.accent, fontSize:12 }}>{inv.id}</td>
+                  <td style={{ fontSize:12, color:T.muted }}>{inv.date}</td>
+                  <td style={{ fontWeight:600 }}>{inv.customer || getSupplierName(inv.supplier_id)}</td>
+                  <td style={{ fontFamily:T.mono }}>{fmt(inv.total)}</td>
+                  <td style={{ fontFamily:T.mono, color:T.yellow }}>{fmt(inv.amount_paid || 0)}</td>
+                  <td style={{ fontFamily:T.mono, fontWeight:800, color:T.green, fontSize:15 }}>{fmt(remaining)}</td>
+                  <td><span style={{ background:T.green+"22", color:T.green, borderRadius:6, padding:"3px 10px", fontFamily:T.mono, fontSize:12, fontWeight:700 }}>{pct}%</span></td>
+                </tr>
+              );
+            })}
+            {purchases.length === 0 && (
+              <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No purchase profits found</td></tr>
+            )}
+          </tbody>
+          {purchases.length > 0 && (
+            <tfoot>
+              <tr style={{ background:T.green+"11", borderTop:`2px solid ${T.green}44` }}>
+                <td colSpan={3} style={{ fontWeight:700, color:T.green, padding:"12px 16px" }}>TOTAL BSM PROFIT</td>
+                <td style={{ fontFamily:T.mono, fontWeight:700 }}>{fmt(totalPurchases)}</td>
+                <td style={{ fontFamily:T.mono, fontWeight:700, color:T.yellow }}>{fmt(totalPaid)}</td>
+                <td style={{ fontFamily:T.mono, fontWeight:800, color:T.green, fontSize:16 }}>{fmt(totalProfit)}</td>
+                <td><span style={{ background:T.green+"22", color:T.green, borderRadius:6, padding:"3px 10px", fontFamily:T.mono, fontSize:12, fontWeight:700 }}>{totalPurchases > 0 ? ((totalProfit/totalPurchases)*100).toFixed(1) : 0}%</span></td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP SHELL ────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("dashboard");
@@ -3238,6 +3348,7 @@ export default function App() {
     ...(isManager ? [{ id: "pl", label: "P&L", icon: "📊" }] : []),
     { id: "reports", label: "Reports", icon: "📈" },
     { id: "locations", label: "Locations", icon: "🏢" },
+    ...(isAdmin ? [{ id: "bsm-profit", label: "BSM Profit", icon: "💎" }] : []),
     ...(isAdmin ? [{ id: "manage-locations", label: "Manage Locations", icon: "📍" }] : []),
     ...(isAdmin ? [{ id: "users", label: "Users", icon: "👥" }] : []),
   ];
@@ -3294,7 +3405,7 @@ export default function App() {
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
               {page === "reports" && <Reports invoices={invoices} products={products} locations={locations} />}
               {page === "locations" && <LocationsPage products={products} invoices={invoices} locations={locations} />}
-              {page === "manage-locations" && <LocationsManagement locations={locations} onRefresh={loadData} userProfile={userProfile} />}
+              {page === "bsm-profit" && <BSMProfit invoices={invoices} suppliers={suppliers} />}
               {page === "users" && <UsersPage currentUser={userProfile} />}
             </>
           )}
