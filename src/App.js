@@ -3040,25 +3040,39 @@ function ReceiptsPage({ clients }) {
       {loading ? <Loader /> : (
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
           <table>
-            <thead><tr><th>ID</th><th>Date</th><th>Client</th><th>Method</th><th>Reference</th><th>Amount</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Date</th><th>Client</th><th>Description</th><th>Reference</th><th>Method</th>
+                <th style={{ color: T.green }}>Credit (Received)</th>
+                <th style={{ color: T.accent }}>Running Total</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {filtered.map(r => (
-                <tr key={r.id}>
-                  <td style={{ fontFamily:T.mono, color:T.green, fontSize:11 }}>{r.id}</td>
-                  <td style={{ fontSize:12, color:T.muted }}>{r.date}</td>
-                  <td style={{ fontWeight:600 }}>{r.clientName}</td>
-                  <td><Badge color={pmColor[r.payment_method]}>{pmLabel[r.payment_method]}</Badge></td>
-                  <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{r.reference || "—"}</td>
-                  <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{fmt(r.amount)}</td>
-                  <td>
-                    <div style={{ display:"flex", gap:6 }}>
-                      <button onClick={() => setEditReceipt(r)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
-                      <button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No receipts found</td></tr>}
+              {(() => {
+                let running = 0;
+                return filtered.map(r => {
+                  running += +r.amount;
+                  return (
+                    <tr key={r.id}>
+                      <td style={{ fontFamily:T.mono, fontSize:12 }}>{r.date}</td>
+                      <td style={{ fontWeight:600 }}>{r.clientName}</td>
+                      <td style={{ fontSize:12, color:T.muted }}>{r.notes || "Payment Received"}</td>
+                      <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{r.reference || "—"}</td>
+                      <td><Badge color={pmColor[r.payment_method]}>{pmLabel[r.payment_method]}</Badge></td>
+                      <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{fmt(r.amount)}</td>
+                      <td style={{ fontFamily:T.mono, fontWeight:800, color:T.accent }}>{fmt(running)}</td>
+                      <td>
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button onClick={() => setEditReceipt(r)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                          <button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                });
+              })()}
+              {filtered.length===0 && <tr><td colSpan={8} style={{ textAlign:"center", color:T.muted, padding:32 }}>No receipts found</td></tr>}
             </tbody>
           </table>
         </div>
@@ -3235,25 +3249,39 @@ function PaymentsPage({ suppliers }) {
       {loading ? <Loader /> : (
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
           <table>
-            <thead><tr><th>ID</th><th>Date</th><th>Supplier</th><th>Method</th><th>Reference</th><th>Amount</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Date</th><th>Supplier</th><th>Description</th><th>Reference</th><th>Method</th>
+                <th style={{ color: T.red }}>Debit (Paid Out)</th>
+                <th style={{ color: T.accent }}>Running Total</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {filtered.map(p => (
-                <tr key={p.id}>
-                  <td style={{ fontFamily:T.mono, color:T.red, fontSize:11 }}>{p.id}</td>
-                  <td style={{ fontSize:12, color:T.muted }}>{p.date}</td>
-                  <td style={{ fontWeight:600 }}>{p.supplierName}</td>
-                  <td><Badge color={pmColor[p.payment_method]}>{pmLabel[p.payment_method]}</Badge></td>
-                  <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{p.reference || "—"}</td>
-                  <td style={{ fontFamily:T.mono, color:T.red, fontWeight:700 }}>{fmt(p.amount)}</td>
-                  <td>
-                    <div style={{ display:"flex", gap:6 }}>
-                      <button onClick={() => setEditPayment(p)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
-                      <button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No payments found</td></tr>}
+              {(() => {
+                let running = 0;
+                return filtered.map(p => {
+                  running += +p.amount;
+                  return (
+                    <tr key={p.id}>
+                      <td style={{ fontFamily:T.mono, fontSize:12 }}>{p.date}</td>
+                      <td style={{ fontWeight:600 }}>{p.supplierName}</td>
+                      <td style={{ fontSize:12, color:T.muted }}>{p.notes || "Payment Made"}</td>
+                      <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{p.reference || "—"}</td>
+                      <td><Badge color={pmColor[p.payment_method]}>{pmLabel[p.payment_method]}</Badge></td>
+                      <td style={{ fontFamily:T.mono, color:T.red, fontWeight:700 }}>{fmt(p.amount)}</td>
+                      <td style={{ fontFamily:T.mono, fontWeight:800, color:T.accent }}>{fmt(running)}</td>
+                      <td>
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button onClick={() => setEditPayment(p)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                          <button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                });
+              })()}
+              {filtered.length===0 && <tr><td colSpan={8} style={{ textAlign:"center", color:T.muted, padding:32 }}>No payments found</td></tr>}
             </tbody>
           </table>
         </div>
