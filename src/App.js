@@ -650,10 +650,12 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
           <table>
             <thead>
               <tr>
-                <th>Product</th><th>SKU</th><th className="hide-mobile">Category</th>
+                {canEdit && <th>Act</th>}
+                <th>Product</th>
+                <th>SKU</th><th className="hide-mobile">Category</th>
                 <th className="hide-mobile">Cost</th><th>Sell</th><th className="hide-mobile">Margin</th>
                 {locations.map(l => <th key={l.id} className="hide-mobile">{l.name.split(" ")[0]}</th>)}
-                <th>Total</th>{canEdit && <th>Actions</th>}
+                <th>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -661,6 +663,12 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
                 const margin = p.sell_price > 0 ? ((p.sell_price - p.cost_price) / p.sell_price * 100).toFixed(1) : 0;
                 return (
                   <tr key={p.id}>
+                    {canEdit && <td>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={() => setEditProduct(p)} style={{ background: T.accent + "22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                        <button onClick={() => deleteProduct(p.id)} style={{ background: T.red + "22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                      </div>
+                    </td>}
                     <td style={{ fontWeight: 600 }}>{p.name}</td>
                     <td style={{ fontFamily: T.mono, fontSize: 12, color: T.muted }}>{p.sku}</td>
                     <td className="hide-mobile"><Badge>{p.category}</Badge></td>
@@ -678,12 +686,6 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
                       );
                     })}
                     <td style={{ fontWeight: 700, fontFamily: T.mono, color: T.accent }}>{p.totalStock || 0}</td>
-                    {canEdit && <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => setEditProduct(p)} style={{ background: T.accent + "22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                        <button onClick={() => deleteProduct(p.id)} style={{ background: T.red + "22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
-                      </div>
-                    </td>}
                   </tr>
                 );
               })}
