@@ -2457,8 +2457,14 @@ function ClientBalance({ clients, invoices, onRefresh }) {
     }
   }, [selected]);
 
-  const [datePeriod, setDatePeriod] = useState("all");
-  const clientInvoices = filterByDate(invoices.filter(i => i.type==="sell" && i.client_id === selected), datePeriod);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const clientInvoices = invoices.filter(i => {
+    if (i.type !== "sell" || i.client_id !== selected) return false;
+    if (fromDate && i.date < fromDate) return false;
+    if (toDate && i.date > toDate) return false;
+    return true;
+  });
   const totalCharged = clientInvoices.reduce((s,i)=>s+i.total,0);
   const totalPaid = payments.filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
   const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
@@ -2540,6 +2546,44 @@ function ClientBalance({ clients, invoices, onRefresh }) {
     w.document.close();
   };
 
+  const printClientLedger = () => {
+    const clientName = clients.find(c => c.id === selected)?.name || "";
+    const ledgerRows = [
+      ...clientInvoices.map(inv => ({ date: inv.date, desc: `Invoice ${inv.id}`, debit: inv.total, credit: 0 })),
+      ...payments.filter(p => {
+        if (fromDate && p.date < fromDate) return false;
+        if (toDate && p.date > toDate) return false;
+        return true;
+      }).map(p => ({ date: p.date, desc: p.type === "payment" ? "Payment Received" : "Additional Charge", notes: p.notes || "", debit: p.type === "charge" ? +p.amount : 0, credit: p.type === "payment" ? +p.amount : 0 })),
+    ].sort((a, b) => a.date.localeCompare(b.date));
+    let running = 0;
+    const rows = ledgerRows.map(r => {
+      running += r.debit - r.credit;
+      return `<tr><td>${r.date}</td><td>${r.desc}</td><td>${r.notes||"—"}</td><td style="color:#cc0000">${r.debit > 0 ? "$"+r.debit.toFixed(2) : "—"}</td><td style="color:#006600">${r.credit > 0 ? "$"+r.credit.toFixed(2) : "—"}</td><td style="font-weight:800;color:${running>0?"#cc0000":"#006600"}">${"$"+Math.abs(running).toFixed(2)+" "+(running>0?"DR":"CR")}</td></tr>`;
+    }).join("");
+    const period = fromDate || toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+    const html = `<!DOCTYPE html><html><head><title>Ledger - ${clientName}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; padding: 30px; font-size: 12px; }
+      h1 { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+      h2 { font-size: 14px; color: #666; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #000; color: #fff; padding: 8px; text-align: left; }
+      td { padding: 7px 8px; border-bottom: 1px solid #eee; }
+      tr:nth-child(even) { background: #f9f9f9; }
+      .footer { margin-top: 20px; text-align: center; font-size: 10px; color: #999; }
+    </style></head><body>
+      <h1>⚡ ElectroPro — Client Ledger</h1>
+      <h2>${clientName}${period}</h2>
+      <table><thead><tr><th>Date</th><th>Description</th><th>Notes</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro Business Manager</div>
+      <script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    w.document.write(html);
+    w.document.close();
+  };
+
   return (
     <div className="page">
       <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6 }}>Client Balance Sheet</h2>
@@ -2559,10 +2603,16 @@ function ClientBalance({ clients, invoices, onRefresh }) {
             <StatCard label="Balance Due" value={fmt(balance)} icon="💳" color={balance>0?T.red:T.green} sub={balance>0?"Outstanding":"Fully paid"} />
           </div>
 
-          <DateFilter value={datePeriod} onChange={setDatePeriod} />
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700 }}>Payment History</h3>
-            <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+            <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1 }}>📅 From:</span>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width: "auto" }} />
+            <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1 }}>To:</span>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width: "auto" }} />
+            <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 11, cursor: "pointer" }}>Clear</button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button onClick={printClientLedger} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 8, padding: "6px 14px", color: T.green, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🖨️ Print Ledger</button>
+              <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
+            </div>
           </div>
 
           {showAdd && (
@@ -2639,7 +2689,6 @@ function ClientBalance({ clients, invoices, onRefresh }) {
                           {!row.isInv && (
                             <div style={{ display: "flex", gap: 6 }}>
                               <button onClick={() => setEditPayment(row.raw)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                              <button onClick={() => printClientPayment(row.raw, clients.find(c=>c.id===selected)?.name||"")} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 6, padding: "4px 8px", color: T.green, fontSize: 11, cursor: "pointer" }}>🖨️</button>
                               <button onClick={() => delPayment(row.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
                             </div>
                           )}
@@ -2716,8 +2765,14 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
     }
   }, [selected]);
 
-  const [datePeriod, setDatePeriod] = useState("all");
-  const supplierInvoices = filterByDate(invoices.filter(i => i.type==="buy" && i.supplier_id === selected), datePeriod);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const supplierInvoices = invoices.filter(i => {
+    if (i.type !== "buy" || i.supplier_id !== selected) return false;
+    if (fromDate && i.date < fromDate) return false;
+    if (toDate && i.date > toDate) return false;
+    return true;
+  });
   const totalOwed = supplierInvoices.reduce((s,i)=>s+i.total,0);
   const totalPaid = payments.filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
   const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
@@ -2798,6 +2853,44 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
     w.document.close();
   };
 
+  const printSupplierLedger = () => {
+    const supplierName = suppliers.find(s => s.id === selected)?.name || "";
+    const ledgerRows = [
+      ...supplierInvoices.map(inv => ({ date: inv.date, desc: `Invoice ${inv.id}`, notes: "", debit: inv.total, credit: 0 })),
+      ...payments.filter(p => {
+        if (fromDate && p.date < fromDate) return false;
+        if (toDate && p.date > toDate) return false;
+        return true;
+      }).map(p => ({ date: p.date, desc: p.type === "payment" ? "Payment Made" : "Additional Charge", notes: p.notes || "", debit: p.type === "charge" ? +p.amount : 0, credit: p.type === "payment" ? +p.amount : 0 })),
+    ].sort((a, b) => a.date.localeCompare(b.date));
+    let running = 0;
+    const rows = ledgerRows.map(r => {
+      running += r.debit - r.credit;
+      return `<tr><td>${r.date}</td><td>${r.desc}</td><td>${r.notes||"—"}</td><td style="color:#cc0000">${r.debit > 0 ? "$"+r.debit.toFixed(2) : "—"}</td><td style="color:#006600">${r.credit > 0 ? "$"+r.credit.toFixed(2) : "—"}</td><td style="font-weight:800;color:${running>0?"#cc0000":"#006600"}">${"$"+Math.abs(running).toFixed(2)+" "+(running>0?"DR":"CR")}</td></tr>`;
+    }).join("");
+    const period = fromDate || toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+    const html = `<!DOCTYPE html><html><head><title>Ledger - ${supplierName}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; padding: 30px; font-size: 12px; }
+      h1 { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+      h2 { font-size: 14px; color: #666; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #000; color: #fff; padding: 8px; text-align: left; }
+      td { padding: 7px 8px; border-bottom: 1px solid #eee; }
+      tr:nth-child(even) { background: #f9f9f9; }
+      .footer { margin-top: 20px; text-align: center; font-size: 10px; color: #999; }
+    </style></head><body>
+      <h1>⚡ ElectroPro — Supplier Ledger</h1>
+      <h2>${supplierName}${period}</h2>
+      <table><thead><tr><th>Date</th><th>Description</th><th>Notes</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro Business Manager</div>
+      <script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    w.document.write(html);
+    w.document.close();
+  };
+
   return (
     <div className="page">
       <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6 }}>Supplier Balance Sheet</h2>
@@ -2817,9 +2910,16 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
             <StatCard label="Balance Owed" value={fmt(balance)} icon="💳" color={balance>0?T.red:T.green} sub={balance>0?"You owe this":"All paid"} />
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700 }}>Payment History</h3>
-            <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+            <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1 }}>📅 From:</span>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width: "auto" }} />
+            <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1 }}>To:</span>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width: "auto" }} />
+            <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 11, cursor: "pointer" }}>Clear</button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button onClick={printSupplierLedger} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 8, padding: "6px 14px", color: T.green, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🖨️ Print Ledger</button>
+              <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
+            </div>
           </div>
 
           {showAdd && (
@@ -2895,7 +2995,6 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
                           {!row.isInv && (
                             <div style={{ display: "flex", gap: 6 }}>
                               <button onClick={() => setEditPayment(row.raw)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                              <button onClick={() => printSupplierPayment(row.raw, suppliers.find(s=>s.id===selected)?.name||"")} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 6, padding: "4px 8px", color: T.green, fontSize: 11, cursor: "pointer" }}>🖨️</button>
                               <button onClick={() => delPayment(row.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
                             </div>
                           )}
@@ -2966,7 +3065,8 @@ function ReceiptsPage({ clients }) {
   const [editReceipt, setEditReceipt] = useState(null);
   const [filterClient, setFilterClient] = useState("");
   const [filterMethod, setFilterMethod] = useState("");
-  const [datePeriod, setDatePeriod] = useState("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [form, setForm] = useState({ client_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
 
   const load = async () => {
@@ -3049,10 +3149,13 @@ function ReceiptsPage({ clients }) {
     w.document.close();
   };
 
-  const filtered = filterByDate(receipts, datePeriod).filter(r =>
-    (!filterClient || r.client_id === +filterClient) &&
-    (!filterMethod || r.payment_method === filterMethod)
-  );
+  const filtered = receipts.filter(r => {
+    if (fromDate && r.date < fromDate) return false;
+    if (toDate && r.date > toDate) return false;
+    if (filterClient && r.client_id !== +filterClient) return false;
+    if (filterMethod && r.payment_method !== filterMethod) return false;
+    return true;
+  });
   const total = filtered.reduce((s,r) => s + +r.amount, 0);
   const byCash = filtered.filter(r=>r.payment_method==="cash_usd").reduce((s,r)=>s+(+r.amount),0);
   const byUsdt = filtered.filter(r=>r.payment_method==="wallet_usdt").reduce((s,r)=>s+(+r.amount),0);
@@ -3091,7 +3194,20 @@ function ReceiptsPage({ clients }) {
         </div>
         <Btn onClick={() => setShowAdd(!showAdd)}>+ New Receipt</Btn>
       </div>
-      <DateFilter value={datePeriod} onChange={setDatePeriod} />
+      <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 14px", marginBottom:16 }}>
+        <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>📅 From:</span>
+        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width:"auto" }} />
+        <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>To:</span>
+        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width:"auto" }} />
+        <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background:"transparent", border:`1px solid ${T.border}`, borderRadius:6, padding:"4px 10px", color:T.muted, fontSize:11, cursor:"pointer" }}>Clear</button>
+        <button onClick={() => {
+          let running = 0;
+          const rows = filtered.map(r => { running += +r.amount; return `<tr><td>${r.date}</td><td>${r.clientName}</td><td>${r.notes||"—"}</td><td>${r.reference||"—"}</td><td>${{cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[r.payment_method]||""}</td><td style="color:#006600;font-weight:700">$${Number(r.amount).toFixed(2)}</td><td style="font-weight:800">$${running.toFixed(2)}</td></tr>`; }).join("");
+          const period = fromDate||toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+          const html = `<!DOCTYPE html><html><head><title>Receipts Ledger</title><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;padding:30px;font-size:12px;}h1{font-size:18px;font-weight:800;margin-bottom:4px;}h2{font-size:14px;color:#666;margin-bottom:20px;}table{width:100%;border-collapse:collapse;}th{background:#000;color:#fff;padding:8px;text-align:left;}td{padding:7px 8px;border-bottom:1px solid #eee;}tr:nth-child(even){background:#f9f9f9;}.footer{margin-top:20px;text-align:center;font-size:10px;color:#999;}</style></head><body><h1>⚡ ElectroPro — Receipts Ledger</h1><h2>${period}</h2><table><thead><tr><th>Date</th><th>Client</th><th>Notes</th><th>Reference</th><th>Method</th><th>Amount</th><th>Running Total</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro</div><script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script></body></html>`;
+          const w = window.open("","_blank","width=900,height=700"); w.document.write(html); w.document.close();
+        }} style={{ marginLeft:"auto", background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:8, padding:"6px 14px", color:T.green, fontSize:12, fontWeight:700, cursor:"pointer" }}>🖨️ Print Ledger</button>
+      </div>
 
       {/* Summary cards */}
       <div className="stats-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:16, marginBottom:24 }}>
@@ -3186,7 +3302,6 @@ function ReceiptsPage({ clients }) {
                       <td>
                         <div style={{ display:"flex", gap:6 }}>
                           <button onClick={() => setEditReceipt(r)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
-                          <button onClick={() => printReceipt(r)} style={{ background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:6, padding:"4px 8px", color:T.green, fontSize:11, cursor:"pointer" }}>🖨️</button>
                           <button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
                         </div>
                       </td>
@@ -3254,7 +3369,8 @@ function PaymentsPage({ suppliers }) {
     setSaving(false);
   };
 
-  const [datePeriod, setDatePeriod] = useState("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   const del = async (id) => {
     if (!window.confirm("Delete this payment?")) return;
@@ -3296,10 +3412,13 @@ function PaymentsPage({ suppliers }) {
     w.document.close();
   };
 
-  const filtered = filterByDate(payments, datePeriod).filter(p =>
-    (!filterSupplier || p.supplier_id === +filterSupplier) &&
-    (!filterMethod || p.payment_method === filterMethod)
-  );
+  const filtered = payments.filter(p => {
+    if (fromDate && p.date < fromDate) return false;
+    if (toDate && p.date > toDate) return false;
+    if (filterSupplier && p.supplier_id !== +filterSupplier) return false;
+    if (filterMethod && p.payment_method !== filterMethod) return false;
+    return true;
+  });
   const total = filtered.reduce((s,p) => s + +p.amount, 0);
   const byCash = filtered.filter(p=>p.payment_method==="cash_usd").reduce((s,p)=>s+(+p.amount),0);
   const byUsdt = filtered.filter(p=>p.payment_method==="wallet_usdt").reduce((s,p)=>s+(+p.amount),0);
@@ -3338,7 +3457,20 @@ function PaymentsPage({ suppliers }) {
         </div>
         <Btn onClick={() => setShowAdd(!showAdd)}>+ New Payment</Btn>
       </div>
-      <DateFilter value={datePeriod} onChange={setDatePeriod} />
+      <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 14px", marginBottom:16 }}>
+        <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>📅 From:</span>
+        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width:"auto" }} />
+        <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>To:</span>
+        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width:"auto" }} />
+        <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background:"transparent", border:`1px solid ${T.border}`, borderRadius:6, padding:"4px 10px", color:T.muted, fontSize:11, cursor:"pointer" }}>Clear</button>
+        <button onClick={() => {
+          let running = 0;
+          const rows = filtered.map(p => { running += +p.amount; return `<tr><td>${p.date}</td><td>${p.supplierName}</td><td>${p.notes||"—"}</td><td>${p.reference||"—"}</td><td>${{cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[p.payment_method]||""}</td><td style="color:#cc0000;font-weight:700">$${Number(p.amount).toFixed(2)}</td><td style="font-weight:800">$${running.toFixed(2)}</td></tr>`; }).join("");
+          const period = fromDate||toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+          const html = `<!DOCTYPE html><html><head><title>Payments Ledger</title><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;padding:30px;font-size:12px;}h1{font-size:18px;font-weight:800;margin-bottom:4px;}h2{font-size:14px;color:#666;margin-bottom:20px;}table{width:100%;border-collapse:collapse;}th{background:#000;color:#fff;padding:8px;text-align:left;}td{padding:7px 8px;border-bottom:1px solid #eee;}tr:nth-child(even){background:#f9f9f9;}.footer{margin-top:20px;text-align:center;font-size:10px;color:#999;}</style></head><body><h1>⚡ ElectroPro — Payments Ledger</h1><h2>${period}</h2><table><thead><tr><th>Date</th><th>Supplier</th><th>Notes</th><th>Reference</th><th>Method</th><th>Amount</th><th>Running Total</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro</div><script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script></body></html>`;
+          const w = window.open("","_blank","width=900,height=700"); w.document.write(html); w.document.close();
+        }} style={{ marginLeft:"auto", background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:8, padding:"6px 14px", color:T.green, fontSize:12, fontWeight:700, cursor:"pointer" }}>🖨️ Print Ledger</button>
+      </div>
 
       {/* Summary cards */}
       <div className="stats-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:16, marginBottom:24 }}>
@@ -3433,7 +3565,6 @@ function PaymentsPage({ suppliers }) {
                       <td>
                         <div style={{ display:"flex", gap:6 }}>
                           <button onClick={() => setEditPayment(p)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
-                          <button onClick={() => printPayment(p)} style={{ background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:6, padding:"4px 8px", color:T.green, fontSize:11, cursor:"pointer" }}>🖨️</button>
                           <button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
                         </div>
                       </td>
