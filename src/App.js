@@ -2184,7 +2184,8 @@ function ClientBalance({ clients, invoices, onRefresh }) {
   const clientInvoices = invoices.filter(i => i.type==="sell" && i.client_id === selected);
   const totalCharged = clientInvoices.reduce((s,i)=>s+i.total,0);
   const totalPaid = payments.filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
-  const balance = totalCharged - totalPaid;
+  const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
+  const balance = totalCharged + totalCharges - totalPaid;
 
   const save = async () => {
     if (!form.amount || !selected) return;
@@ -2280,17 +2281,25 @@ function ClientBalance({ clients, invoices, onRefresh }) {
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: T.accent, textTransform: "uppercase", letterSpacing: 1 }}>Invoice History</h3>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
             <table>
-              <thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Status</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Paid</th><th>Remaining</th><th>Status</th></tr></thead>
               <tbody>
-                {clientInvoices.map(inv => (
-                  <tr key={inv.id}>
-                    <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
-                    <td style={{ fontSize: 12 }}>{inv.date}</td>
-                    <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
-                    <td><Badge color={T.green}>PAID</Badge></td>
-                  </tr>
-                ))}
-                {clientInvoices.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No invoices for this client</td></tr>}
+                {clientInvoices.map(inv => {
+                  const paid = inv.amount_paid || 0;
+                  const remaining = inv.total - paid;
+                  const statusColor = inv.payment_status === "paid" ? T.green : inv.payment_status === "partial" ? T.yellow : T.red;
+                  const statusLabel = inv.payment_status === "paid" ? "PAID" : inv.payment_status === "partial" ? "PARTIAL" : "PENDING";
+                  return (
+                    <tr key={inv.id}>
+                      <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
+                      <td style={{ fontSize: 12 }}>{inv.date}</td>
+                      <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
+                      <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(paid)}</td>
+                      <td style={{ fontFamily: T.mono, color: remaining > 0 ? T.red : T.green }}>{fmt(remaining)}</td>
+                      <td><Badge color={statusColor}>{statusLabel}</Badge></td>
+                    </tr>
+                  );
+                })}
+                {clientInvoices.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No invoices for this client</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2319,7 +2328,8 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
   const supplierInvoices = invoices.filter(i => i.type==="buy" && i.supplier_id === selected);
   const totalOwed = supplierInvoices.reduce((s,i)=>s+i.total,0);
   const totalPaid = payments.filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
-  const balance = totalOwed - totalPaid;
+  const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
+  const balance = totalOwed + totalCharges - totalPaid;
 
   const save = async () => {
     if (!form.amount || !selected) return;
@@ -2415,16 +2425,25 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: T.accent, textTransform: "uppercase", letterSpacing: 1 }}>Purchase History</h3>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
             <table>
-              <thead><tr><th>Invoice</th><th>Date</th><th>Total</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Paid</th><th>Remaining</th><th>Status</th></tr></thead>
               <tbody>
-                {supplierInvoices.map(inv => (
-                  <tr key={inv.id}>
-                    <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
-                    <td style={{ fontSize: 12 }}>{inv.date}</td>
-                    <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
-                  </tr>
-                ))}
-                {supplierInvoices.length === 0 && <tr><td colSpan={3} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No purchases for this supplier</td></tr>}
+                {supplierInvoices.map(inv => {
+                  const paid = inv.amount_paid || 0;
+                  const remaining = inv.total - paid;
+                  const statusColor = inv.payment_status === "paid" ? T.green : inv.payment_status === "partial" ? T.yellow : T.red;
+                  const statusLabel = inv.payment_status === "paid" ? "PAID" : inv.payment_status === "partial" ? "PARTIAL" : "PENDING";
+                  return (
+                    <tr key={inv.id}>
+                      <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
+                      <td style={{ fontSize: 12 }}>{inv.date}</td>
+                      <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
+                      <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(paid)}</td>
+                      <td style={{ fontFamily: T.mono, color: remaining > 0 ? T.red : T.green }}>{fmt(remaining)}</td>
+                      <td><Badge color={statusColor}>{statusLabel}</Badge></td>
+                    </tr>
+                  );
+                })}
+                {supplierInvoices.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No purchases for this supplier</td></tr>}
               </tbody>
             </table>
           </div>
