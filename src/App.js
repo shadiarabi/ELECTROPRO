@@ -2381,19 +2381,28 @@ function Reports({ invoices, products, locations }) {
     return true;
   });
 
-  const sells = filtered.filter(i => i.type==="sell"&&i.status==="paid");
-  const buys = filtered.filter(i => i.type==="buy"&&i.status==="paid");
-  const revenue = sells.reduce((s,i)=>s+i.total,0);
-  const cogs = sells.reduce((s,i)=>s+i.cogs,0);
+  const getStatus = i => i.payment_status || i.status || "pending";
+  const sells = filtered.filter(i => i.type==="sell");
+  const paidSells = sells.filter(i => getStatus(i) === "paid");
+  const buys = filtered.filter(i => i.type==="buy");
+  const paidBuys = buys.filter(i => getStatus(i) === "paid");
+  const revenue = paidSells.reduce((s,i)=>s+i.total,0);
+  const revenuePending = sells.filter(i=>getStatus(i)!=="paid").reduce((s,i)=>s+i.total,0);
+  const cogs = paidSells.reduce((s,i)=>s+i.cogs,0);
   const profit = revenue - cogs;
+  const expectedProfit = sells.reduce((s,i)=>s+i.profit,0);
 
-  // Daily breakdown
+  // Daily breakdown — all sells
   const daily = {};
   sells.forEach(inv => {
-    if (!daily[inv.date]) daily[inv.date] = { revenue: 0, profit: 0, count: 0 };
-    daily[inv.date].revenue += inv.total;
-    daily[inv.date].profit += inv.profit;
-    daily[inv.date].count++;
+    if (!daily[inv.date]) daily[inv.date] = { revenue: 0, profit: 0, count: 0, pending: 0 };
+    if (getStatus(inv) === "paid") {
+      daily[inv.date].revenue += inv.total;
+      daily[inv.date].profit += inv.profit;
+      daily[inv.date].count++;
+    } else {
+      daily[inv.date].pending += inv.total;
+    }
   });
   const dailyArr = Object.entries(daily).sort((a,b)=>b[0].localeCompare(a[0]));
 
@@ -2426,10 +2435,12 @@ function Reports({ invoices, products, locations }) {
       </div>
 
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        <StatCard label="Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} sales`} />
-        <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${revenue>0?((profit/revenue)*100).toFixed(1):0}% margin`} />
-        <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} />
-        <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" />
+        <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${paidSells.length} paid sales`} />
+        <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${sells.filter(i=>getStatus(i)!=="paid").length} pending`} />
+        <StatCard label="Net Profit (Paid)" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${revenue>0?((profit/revenue)*100).toFixed(1):0}% margin`} />
+        <StatCard label="Expected Profit" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit>=0?T.accent:T.red} sub="All invoices" />
+        <StatCard label="Purchases" value={fmt(paidBuys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${paidBuys.length} orders`} />
+        <StatCard label="Avg Sale" value={fmt(paidSells.length?revenue/paidSells.length:0)} icon="📊" color={T.accent} sub="per invoice" />
       </div>
 
       <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -2439,17 +2450,18 @@ function Reports({ invoices, products, locations }) {
             <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: T.accent }}>Daily Breakdown</h3>
           </div>
           <table>
-            <thead><tr><th>Date</th><th>Sales</th><th>Revenue</th><th>Profit</th></tr></thead>
+            <thead><tr><th>Date</th><th>Paid</th><th>Revenue</th><th>Pending</th><th>Profit</th></tr></thead>
             <tbody>
               {dailyArr.slice(0, 15).map(([date, d]) => (
                 <tr key={date}>
                   <td style={{ fontFamily: T.mono, fontSize: 12 }}>{date}</td>
                   <td style={{ fontFamily: T.mono, color: T.muted }}>{d.count}</td>
                   <td style={{ fontFamily: T.mono }}>{fmt(d.revenue)}</td>
+                  <td style={{ fontFamily: T.mono, color: T.yellow }}>{d.pending > 0 ? fmt(d.pending) : "—"}</td>
                   <td style={{ fontFamily: T.mono, color: d.profit>=0?T.green:T.red }}>{fmt(d.profit)}</td>
                 </tr>
               ))}
-              {dailyArr.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No sales in this period</td></tr>}
+              {dailyArr.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No sales in this period</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2482,18 +2494,23 @@ function Reports({ invoices, products, locations }) {
           <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: T.accent }}>Performance by Location</h3>
         </div>
         <table>
-          <thead><tr><th>Location</th><th>Sales</th><th>Revenue</th><th>Profit</th><th>Margin</th></tr></thead>
+          <thead><tr><th>Location</th><th>All Sales</th><th>Paid</th><th>Pending</th><th>Profit</th><th>Margin</th></tr></thead>
           <tbody>
             {locations.map(l => {
               const ls = sells.filter(i => i.location_id===l.id);
-              const lr = ls.reduce((s,i)=>s+i.total,0);
-              const lp = ls.reduce((s,i)=>s+i.profit,0);
+              const lsPaid = ls.filter(i => getStatus(i)==="paid");
+              const lsPending = ls.filter(i => getStatus(i)!=="paid");
+              const lr = lsPaid.reduce((s,i)=>s+i.total,0);
+              const lrPending = lsPending.reduce((s,i)=>s+i.total,0);
+              const lp = lsPaid.reduce((s,i)=>s+i.profit,0);
               const lm = lr>0?(lp/lr*100).toFixed(1):0;
+              if (ls.length === 0) return null;
               return (
                 <tr key={l.id}>
                   <td style={{ fontWeight: 600 }}>🏢 {l.name}</td>
                   <td style={{ fontFamily: T.mono }}>{ls.length}</td>
-                  <td style={{ fontFamily: T.mono }}>{fmt(lr)}</td>
+                  <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(lr)}</td>
+                  <td style={{ fontFamily: T.mono, color: T.yellow }}>{lrPending > 0 ? fmt(lrPending) : "—"}</td>
                   <td style={{ fontFamily: T.mono, color: lp>=0?T.green:T.red }}>{fmt(lp)}</td>
                   <td style={{ fontFamily: T.mono, color: +lm>20?T.green:T.yellow }}>{lm}%</td>
                 </tr>
@@ -3360,7 +3377,7 @@ export default function App() {
         return s + i.quantity * costPrice;
       }, 0);
       const profit = inv.type === "sell" ? total - cogs : 0;
-      return { ...inv, total, cogs, profit, locationName: inv.locations?.name || "", invoice_items: undefined, locations: undefined };
+      return { ...inv, total, cogs, profit, locationName: inv.locations?.name || "", locations: undefined };
     });
     const locsWithRevenue = locsData.map(l => {
       const locAllSells = invsData.filter(i => i.location_id === l.id && i.type === "sell");
