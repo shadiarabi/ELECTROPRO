@@ -693,11 +693,6 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
     setPrintInv({ ...inv, invoice_items: items });
   };
 
-  const handlePrint = async (inv) => {
-    const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
-    setPrintInv({ ...inv, invoice_items: items });
-  };
-
   const saveEdit = async () => {
     if (!editInv) return;
     setSaving(true);
