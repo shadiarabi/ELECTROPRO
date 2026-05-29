@@ -308,6 +308,9 @@ function PrintInvoice({ inv, locations, onClose }) {
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13 }}>
                   <span>Subtotal</span><span>{fmt((inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0))}</span>
                 </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#444" }}>
+                  <span>Total Qty</span><span style={{ fontWeight: 700 }}>{(inv.invoice_items || []).reduce((s, i) => s + i.quantity, 0)} units</span>
+                </div>
                 {inv.discount_value > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "red" }}>
                     <span>Discount {inv.discount_type === "pct" ? `(${inv.discount_value}%)` : ""}</span>
