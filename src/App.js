@@ -495,60 +495,74 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
   const [editProduct, setEditProduct] = useState(null);
-  const [adjustStock, setAdjustStock] = useState(null); // { product, location_id, currentQty }
+  const [adjustStock, setAdjustStock] = useState(null);
   const [adjustForm, setAdjustForm] = useState({ newQty: "", reason: "correction", notes: "" });
   const [form, setForm] = useState({ name: "", sku: "", category: "", cost_price: "", sell_price: "" });
   const canEdit = ["admin", "manager"].includes(userProfile?.role);
 
   const resyncStock = async () => {
-    if (!window.confirm("This will recalculate all stock quantities based on invoices. Continue?")) return;
+    if (!window.confirm("Recalculate all stock from invoices and transfers?")) return;
     setSyncing(true);
-    // Get all products and locations
-    const { data: allProducts } = await supabase.from("products").select("id");
-    const { data: allLocations } = await supabase.from("locations").select("id");
-    const { data: allInvoices } = await supabase.from("invoices").select("id, type, location_id, status");
-    const { data: allItems } = await supabase.from("invoice_items").select("invoice_id, product_id, quantity");
+    setSyncMsg("Loading data...");
 
-    // Build stock map: { product_id_location_id: qty }
+    // Fetch everything in parallel
+    const [invRes, itemRes, transferRes, stockRes] = await Promise.all([
+      supabase.from("invoices").select("id, type, location_id"),
+      supabase.from("invoice_items").select("invoice_id, product_id, quantity"),
+      supabase.from("stock_transfers").select("product_id, from_location_id, to_location_id, quantity"),
+      supabase.from("stock").select("id, product_id, location_id"),
+    ]);
+
+    setSyncMsg("Calculating...");
+    const invoices = invRes.data || [];
+    const items = itemRes.data || [];
+    const transfers = transferRes.data || [];
+    const stockRows = stockRes.data || [];
+
+    // Build invoice lookup map
+    const invMap = {};
+    for (const inv of invoices) invMap[inv.id] = inv;
+
+    // Calculate stock per product+location
     const stockMap = {};
-    for (const inv of (allInvoices || [])) {
-      const items = (allItems || []).filter(i => i.invoice_id === inv.id);
-      for (const item of items) {
-        const key = `${item.product_id}_${inv.location_id}`;
-        if (!stockMap[key]) stockMap[key] = 0;
-        if (inv.type === "buy") stockMap[key] += +item.quantity;
-        if (inv.type === "sell") stockMap[key] -= +item.quantity;
-      }
+    const key = (pid, lid) => `${pid}_${lid}`;
+
+    for (const item of items) {
+      const inv = invMap[item.invoice_id];
+      if (!inv) continue;
+      const k = key(item.product_id, inv.location_id);
+      if (!stockMap[k]) stockMap[k] = 0;
+      if (inv.type === "buy") stockMap[k] += +item.quantity;
+      if (inv.type === "sell") stockMap[k] -= +item.quantity;
     }
 
-    // Get all stock transfers
-    const { data: transfers } = await supabase.from("stock_transfers").select("product_id, from_location_id, to_location_id, quantity");
-    for (const t of (transfers || [])) {
-      const fromKey = `${t.product_id}_${t.from_location_id}`;
-      const toKey = `${t.product_id}_${t.to_location_id}`;
-      if (!stockMap[fromKey]) stockMap[fromKey] = 0;
-      if (!stockMap[toKey]) stockMap[toKey] = 0;
-      stockMap[fromKey] -= +t.quantity;
-      stockMap[toKey] += +t.quantity;
+    for (const t of transfers) {
+      const fk = key(t.product_id, t.from_location_id);
+      const tk = key(t.product_id, t.to_location_id);
+      if (!stockMap[fk]) stockMap[fk] = 0;
+      if (!stockMap[tk]) stockMap[tk] = 0;
+      stockMap[fk] -= +t.quantity;
+      stockMap[tk] += +t.quantity;
     }
 
-    // Update all stock rows
-    for (const prod of (allProducts || [])) {
-      for (const loc of (allLocations || [])) {
-        const key = `${prod.id}_${loc.id}`;
-        const qty = Math.max(0, stockMap[key] || 0);
-        const { data: row } = await supabase.from("stock").select("id").eq("product_id", prod.id).eq("location_id", loc.id).single().catch(() => ({ data: null }));
-        if (row) {
-          await supabase.from("stock").update({ quantity: qty }).eq("product_id", prod.id).eq("location_id", loc.id);
-        } else {
-          await supabase.from("stock").insert({ product_id: prod.id, location_id: loc.id, quantity: qty });
-        }
-      }
+    setSyncMsg("Updating stock...");
+    // Update existing stock rows in batches
+    const updates = stockRows.map(row => {
+      const k = key(row.product_id, row.location_id);
+      const qty = Math.max(0, stockMap[k] || 0);
+      return supabase.from("stock").update({ quantity: qty }).eq("id", row.id);
+    });
+
+    // Run in batches of 20
+    for (let i = 0; i < updates.length; i += 20) {
+      await Promise.all(updates.slice(i, i + 20));
     }
 
-    onRefresh();
+    setSyncMsg("");
     setSyncing(false);
+    onRefresh();
     alert("✅ Stock re-synced successfully!");
   };
 
@@ -612,8 +626,12 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
           <h2 style={{ fontSize: 28, fontWeight: 800 }}>Inventory</h2>
           <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{products.length} products · {locations.length} locations</p>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          {canEdit && <Btn onClick={resyncStock} loading={syncing} color={T.yellow}>🔄 Re-Sync Stock</Btn>}
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {canEdit && (
+            <button onClick={resyncStock} disabled={syncing} style={{ background: T.yellow+"22", border: `1px solid ${T.yellow}44`, borderRadius: 8, padding: "8px 16px", color: T.yellow, fontSize: 12, fontWeight: 700, cursor: syncing ? "not-allowed" : "pointer" }}>
+              {syncing ? `🔄 ${syncMsg}` : "🔄 Re-Sync Stock"}
+            </button>
+          )}
           {canEdit && <Btn onClick={() => setShowAdd(!showAdd)}>+ Add Product</Btn>}
         </div>
       </div>
