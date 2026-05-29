@@ -2625,22 +2625,32 @@ function ClientBalance({ clients, invoices, onRefresh }) {
             <table>
               <thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Paid</th><th>Remaining</th><th>Status</th></tr></thead>
               <tbody>
-                {clientInvoices.map(inv => {
-                  const paid = inv.amount_paid || 0;
-                  const remaining = inv.total - paid;
-                  const statusColor = inv.payment_status === "paid" ? T.green : inv.payment_status === "partial" ? T.yellow : T.red;
-                  const statusLabel = inv.payment_status === "paid" ? "PAID" : inv.payment_status === "partial" ? "PARTIAL" : "PENDING";
-                  return (
-                    <tr key={inv.id}>
-                      <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
-                      <td style={{ fontSize: 12 }}>{inv.date}</td>
-                      <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
-                      <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(paid)}</td>
-                      <td style={{ fontFamily: T.mono, color: remaining > 0 ? T.red : T.green }}>{fmt(remaining)}</td>
-                      <td><Badge color={statusColor}>{statusLabel}</Badge></td>
-                    </tr>
-                  );
-                })}
+                {(() => {
+                  const allInvsSorted = [...clientInvoices].sort((a,b) => a.date.localeCompare(b.date));
+                  let rem = totalPaid;
+                  const paidMap = {};
+                  for (const inv of allInvsSorted) {
+                    if (rem >= inv.total) { paidMap[inv.id] = inv.total; rem -= inv.total; }
+                    else if (rem > 0) { paidMap[inv.id] = rem; rem = 0; }
+                    else { paidMap[inv.id] = 0; }
+                  }
+                  return clientInvoices.map(inv => {
+                    const paid = paidMap[inv.id] || 0;
+                    const remaining = inv.total - paid;
+                    const statusColor = paid >= inv.total ? T.green : paid > 0 ? T.yellow : T.red;
+                    const statusLabel = paid >= inv.total ? "PAID" : paid > 0 ? "PARTIAL" : "PENDING";
+                    return (
+                      <tr key={inv.id}>
+                        <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
+                        <td style={{ fontSize: 12 }}>{inv.date}</td>
+                        <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(paid)}</td>
+                        <td style={{ fontFamily: T.mono, color: remaining > 0 ? T.red : T.green }}>{fmt(remaining)}</td>
+                        <td><Badge color={statusColor}>{statusLabel}</Badge></td>
+                      </tr>
+                    );
+                  });
+                })()}
                 {clientInvoices.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No invoices for this client</td></tr>}
               </tbody>
             </table>
@@ -2838,22 +2848,33 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
             <table>
               <thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Paid</th><th>Remaining</th><th>Status</th></tr></thead>
               <tbody>
-                {supplierInvoices.map(inv => {
-                  const paid = inv.amount_paid || 0;
-                  const remaining = inv.total - paid;
-                  const statusColor = inv.payment_status === "paid" ? T.green : inv.payment_status === "partial" ? T.yellow : T.red;
-                  const statusLabel = inv.payment_status === "paid" ? "PAID" : inv.payment_status === "partial" ? "PARTIAL" : "PENDING";
-                  return (
-                    <tr key={inv.id}>
-                      <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
-                      <td style={{ fontSize: 12 }}>{inv.date}</td>
-                      <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
-                      <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(paid)}</td>
-                      <td style={{ fontFamily: T.mono, color: remaining > 0 ? T.red : T.green }}>{fmt(remaining)}</td>
-                      <td><Badge color={statusColor}>{statusLabel}</Badge></td>
-                    </tr>
-                  );
-                })}
+                {(() => {
+                  // Calculate paid per invoice from payments pool (same logic as refreshInvoices)
+                  const allInvsSorted = [...supplierInvoices].sort((a,b) => a.date.localeCompare(b.date));
+                  let rem = totalPaid;
+                  const paidMap = {};
+                  for (const inv of allInvsSorted) {
+                    if (rem >= inv.total) { paidMap[inv.id] = inv.total; rem -= inv.total; }
+                    else if (rem > 0) { paidMap[inv.id] = rem; rem = 0; }
+                    else { paidMap[inv.id] = 0; }
+                  }
+                  return supplierInvoices.map(inv => {
+                    const paid = paidMap[inv.id] || 0;
+                    const remaining = inv.total - paid;
+                    const statusColor = paid >= inv.total ? T.green : paid > 0 ? T.yellow : T.red;
+                    const statusLabel = paid >= inv.total ? "PAID" : paid > 0 ? "PARTIAL" : "PENDING";
+                    return (
+                      <tr key={inv.id}>
+                        <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
+                        <td style={{ fontSize: 12 }}>{inv.date}</td>
+                        <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(paid)}</td>
+                        <td style={{ fontFamily: T.mono, color: remaining > 0 ? T.red : T.green }}>{fmt(remaining)}</td>
+                        <td><Badge color={statusColor}>{statusLabel}</Badge></td>
+                      </tr>
+                    );
+                  });
+                })()}
                 {supplierInvoices.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No purchases for this supplier</td></tr>}
               </tbody>
             </table>
