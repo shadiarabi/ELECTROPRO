@@ -386,17 +386,28 @@ function Dashboard({ invoices, products, locations, userProfile }) {
         <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 24 }}>
             <h3 style={{ fontSize: 13, letterSpacing: 2, textTransform: "uppercase", color: T.muted, marginBottom: 20 }}>Revenue by Location</h3>
-            {locations.map(l => (
+            {locations.filter(l => l.revenueTotal > 0).map(l => (
               <div key={l.id} style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 13 }}>
                   <span>{l.name}</span>
-                  <span style={{ fontFamily: T.mono, color: T.accent }}>{fmt(l.revenue || 0)}</span>
+                  <div style={{ display:"flex", gap:10 }}>
+                    {l.revenue > 0 && <span style={{ fontFamily: T.mono, color: T.green, fontSize:12 }}>✅ {fmt(l.revenue)}</span>}
+                    {l.revenuePending > 0 && <span style={{ fontFamily: T.mono, color: T.yellow, fontSize:12 }}>⏳ {fmt(l.revenuePending)}</span>}
+                  </div>
                 </div>
-                <div style={{ background: T.border, borderRadius: 4, height: 6 }}>
-                  <div style={{ width: `${((l.revenue || 0) / maxRev) * 100}%`, height: "100%", background: `linear-gradient(90deg,${T.accent},${T.green})`, borderRadius: 4 }} />
+                <div style={{ background: T.border, borderRadius: 4, height: 8, display:"flex", overflow:"hidden" }}>
+                  <div style={{ width: `${(l.revenue / Math.max(...locations.map(x=>x.revenueTotal||0),1)) * 100}%`, height: "100%", background: T.green }} />
+                  <div style={{ width: `${(l.revenuePending / Math.max(...locations.map(x=>x.revenueTotal||0),1)) * 100}%`, height: "100%", background: T.yellow }} />
                 </div>
               </div>
             ))}
+            {locations.every(l => !l.revenueTotal) && (
+              <div style={{ color:T.muted, fontSize:13, textAlign:"center", padding:20 }}>No sales recorded yet</div>
+            )}
+            <div style={{ display:"flex", gap:16, marginTop:12, fontSize:11 }}>
+              <span style={{ color:T.green }}>■ Paid</span>
+              <span style={{ color:T.yellow }}>■ Pending</span>
+            </div>
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 24 }}>
             <h3 style={{ fontSize: 13, letterSpacing: 2, textTransform: "uppercase", color: T.muted, marginBottom: 20 }}>P&L Summary</h3>
@@ -3162,8 +3173,15 @@ export default function App() {
       return { ...inv, total, cogs, profit, locationName: inv.locations?.name || "", invoice_items: undefined, locations: undefined };
     });
     const locsWithRevenue = locsData.map(l => {
-      const locSells = invsData.filter(i => i.location_id === l.id && i.type === "sell" && i.status === "paid");
-      return { ...l, revenue: locSells.reduce((s, i) => s + i.total, 0) };
+      const locAllSells = invsData.filter(i => i.location_id === l.id && i.type === "sell");
+      const locPaidSells = locAllSells.filter(i => i.status === "paid");
+      const locPendingSells = locAllSells.filter(i => i.status !== "paid");
+      return {
+        ...l,
+        revenue: locPaidSells.reduce((s, i) => s + i.total, 0),
+        revenuePending: locPendingSells.reduce((s, i) => s + i.total, 0),
+        revenueTotal: locAllSells.reduce((s, i) => s + i.total, 0),
+      };
     });
 
     setLocations(locsWithRevenue);
