@@ -328,12 +328,17 @@ function PrintInvoice({ inv, locations, onClose }) {
 function Dashboard({ invoices, products, locations, userProfile }) {
   const sells = invoices.filter(i => i.type === "sell" && i.status === "paid");
   const sellsPending = invoices.filter(i => i.type === "sell" && (i.status === "pending" || i.status === "partial"));
+  const allSells = invoices.filter(i => i.type === "sell");
   const buys = invoices.filter(i => i.type === "buy" && i.status === "paid");
   const buysPending = invoices.filter(i => i.type === "buy" && (i.status === "pending" || i.status === "partial"));
   const revenue = sells.reduce((s, i) => s + i.total, 0);
   const revenuePending = sellsPending.reduce((s, i) => s + i.total - (i.amount_paid || 0), 0);
   const cogs = sells.reduce((s, i) => s + i.cogs, 0);
+  const cogsPending = sellsPending.reduce((s, i) => s + i.cogs, 0);
   const profit = revenue - cogs;
+  const expectedRevenue = allSells.reduce((s, i) => s + i.total, 0);
+  const expectedCogs = allSells.reduce((s, i) => s + i.cogs, 0);
+  const expectedProfit = expectedRevenue - expectedCogs;
   const purchasesPaid = buys.reduce((s, i) => s + i.total, 0);
   const purchasesPending = buysPending.reduce((s, i) => s + i.total - (i.amount_paid || 0), 0);
   const totalItems = products.reduce((s, p) => s + (p.totalStock || 0), 0);
@@ -350,7 +355,8 @@ function Dashboard({ invoices, products, locations, userProfile }) {
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
         {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} />}
         {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending sales`} />}
-        {canSeeFinancials && <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} />}
+        {canSeeFinancials && <StatCard label="Net Profit (Paid)" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} />}
+        {canSeeFinancials && <StatCard label="Expected Profit" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit >= 0 ? T.accent : T.red} sub={`All invoices incl. pending`} />}
         {canSeeFinancials && <StatCard label="Paid Purchases" value={fmt(purchasesPaid)} icon="✅" color={T.green} sub={`${buys.length} paid`} />}
         {canSeeFinancials && <StatCard label="Pending Purchases" value={fmt(purchasesPending)} icon="🔴" color={T.red} sub={`${buysPending.length} pending`} />}
         <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} />
@@ -397,10 +403,12 @@ function Dashboard({ invoices, products, locations, userProfile }) {
             {[
               { label: "Paid Revenue", val: revenue, color: T.green },
               { label: "Pending Revenue", val: revenuePending, color: T.yellow },
-              { label: "Cost of Goods Sold", val: -cogs, color: T.red },
-              { label: "Gross Profit", val: revenue - cogs, color: T.accent, bold: true },
+              { label: "Expected Total Revenue", val: expectedRevenue, color: T.accent, bold: true },
+              { label: "Cost of Goods Sold (Paid)", val: -cogs, color: T.red },
+              { label: "Cost of Goods Sold (Pending)", val: -cogsPending, color: T.red },
+              { label: "Net Profit (Paid Only)", val: profit, color: profit >= 0 ? T.green : T.red, bold: true },
+              { label: "Expected Profit (All)", val: expectedProfit, color: expectedProfit >= 0 ? T.accent : T.red, bold: true },
               { label: "Pending Purchases Due", val: -purchasesPending, color: T.red },
-              { label: "Net Profit / Loss", val: profit, color: profit >= 0 ? T.green : T.red, bold: true },
             ].map((row, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
                 <span style={{ fontSize: 13, color: row.bold ? T.text : T.muted, fontWeight: row.bold ? 700 : 400 }}>{row.label}</span>
