@@ -2029,7 +2029,7 @@ function StockTransfer({ products, locations, onRefresh }) {
 
 // ─── REPORTS ──────────────────────────────────────────────────────────────────
 function Reports({ invoices, products, locations }) {
-  const [period, setPeriod] = useState("this_month");
+  const [period, setPeriod] = useState("all");
   const now = new Date();
 
   const filtered = invoices.filter(i => {
@@ -2042,11 +2042,14 @@ function Reports({ invoices, products, locations }) {
     return true;
   });
 
-  const sells = filtered.filter(i => i.type==="sell"&&i.status==="paid");
-  const buys = filtered.filter(i => i.type==="buy"&&i.status==="paid");
+  const sells = filtered.filter(i => i.type==="sell" && (i.status==="paid" || i.status==="pending" || i.status==="partial"));
+  const buys = filtered.filter(i => i.type==="buy" && (i.status==="paid" || i.status==="pending" || i.status==="partial"));
+  const paidSells = sells.filter(i => i.status==="paid");
   const revenue = sells.reduce((s,i)=>s+i.total,0);
-  const cogs = sells.reduce((s,i)=>s+i.cogs,0);
-  const profit = revenue - cogs;
+  const paidRevenue = paidSells.reduce((s,i)=>s+i.total,0);
+  const pendingRevenue = revenue - paidRevenue;
+  const cogs = paidSells.reduce((s,i)=>s+i.cogs,0);
+  const profit = paidRevenue - cogs;
 
   // Daily breakdown
   const daily = {};
@@ -2087,8 +2090,10 @@ function Reports({ invoices, products, locations }) {
       </div>
 
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        <StatCard label="Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} sales`} />
-        <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${revenue>0?((profit/revenue)*100).toFixed(1):0}% margin`} />
+        <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} />
+        <StatCard label="Paid Revenue" value={fmt(paidRevenue)} icon="✅" color={T.green} sub={`${paidSells.length} paid`} />
+        <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sells.length - paidSells.length} pending`} />
+        <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} />
         <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} />
         <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" />
       </div>
