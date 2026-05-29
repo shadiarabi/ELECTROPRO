@@ -2949,6 +2949,40 @@ function ReceiptsPage({ clients }) {
     load();
   };
 
+  const printReceipt = (r) => {
+    const html = `<!DOCTYPE html><html><head><title>Receipt ${r.id}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; max-width: 400px; margin: 0 auto; }
+      h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+      .box { border: 2px solid #000; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      .row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 700; }
+      .amount { font-size: 22px; font-weight: 800; color: #006600; text-align: center; padding: 16px; border: 2px solid #006600; border-radius: 8px; margin: 16px 0; }
+      .footer { text-align: center; font-size: 11px; color: #999; margin-top: 20px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="subtitle">RECEIPT VOUCHER</div>
+      <div class="amount">$${Number(r.amount).toFixed(2)}</div>
+      <div class="box">
+        <div class="row"><span class="label">Receipt ID</span><span class="value">${r.id}</span></div>
+        <div class="row"><span class="label">Date</span><span class="value">${r.date}</span></div>
+        <div class="row"><span class="label">Client</span><span class="value">${r.clientName}</span></div>
+        <div class="row"><span class="label">Payment Method</span><span class="value">${{cash_usd:"💵 Cash USD",wallet_usdt:"💎 Wallet USDT",bank_transfer:"🏦 Bank Transfer"}[r.payment_method]||r.payment_method}</span></div>
+        ${r.reference ? `<div class="row"><span class="label">Reference #</span><span class="value">${r.reference}</span></div>` : ""}
+        ${r.notes ? `<div class="row"><span class="label">Notes</span><span class="value">${r.notes}</span></div>` : ""}
+      </div>
+      <div class="footer">Thank you for your payment! • ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=500,height=700");
+    w.document.write(html);
+    w.document.close();
+  };
+
   const filtered = filterByDate(receipts, datePeriod).filter(r =>
     (!filterClient || r.client_id === +filterClient) &&
     (!filterMethod || r.payment_method === filterMethod)
@@ -3086,6 +3120,7 @@ function ReceiptsPage({ clients }) {
                       <td>
                         <div style={{ display:"flex", gap:6 }}>
                           <button onClick={() => setEditReceipt(r)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                          <button onClick={() => printReceipt(r)} style={{ background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:6, padding:"4px 8px", color:T.green, fontSize:11, cursor:"pointer" }}>🖨️</button>
                           <button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
                         </div>
                       </td>
@@ -3153,13 +3188,49 @@ function PaymentsPage({ suppliers }) {
     setSaving(false);
   };
 
+  const [datePeriod, setDatePeriod] = useState("all");
+
   const del = async (id) => {
     if (!window.confirm("Delete this payment?")) return;
     await supabase.from("payments").delete().eq("id", id);
     load();
   };
 
-  const filtered = payments.filter(p =>
+  const printPayment = (p) => {
+    const html = `<!DOCTYPE html><html><head><title>Payment ${p.id}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; max-width: 400px; margin: 0 auto; }
+      h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+      .box { border: 2px solid #000; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      .row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 700; }
+      .amount { font-size: 22px; font-weight: 800; color: #cc0000; text-align: center; padding: 16px; border: 2px solid #cc0000; border-radius: 8px; margin: 16px 0; }
+      .footer { text-align: center; font-size: 11px; color: #999; margin-top: 20px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="subtitle">PAYMENT VOUCHER</div>
+      <div class="amount">$${Number(p.amount).toFixed(2)}</div>
+      <div class="box">
+        <div class="row"><span class="label">Payment ID</span><span class="value">${p.id}</span></div>
+        <div class="row"><span class="label">Date</span><span class="value">${p.date}</span></div>
+        <div class="row"><span class="label">Supplier</span><span class="value">${p.supplierName}</span></div>
+        <div class="row"><span class="label">Payment Method</span><span class="value">${{cash_usd:"💵 Cash USD",wallet_usdt:"💎 Wallet USDT",bank_transfer:"🏦 Bank Transfer"}[p.payment_method]||p.payment_method}</span></div>
+        ${p.reference ? `<div class="row"><span class="label">Reference #</span><span class="value">${p.reference}</span></div>` : ""}
+        ${p.notes ? `<div class="row"><span class="label">Notes</span><span class="value">${p.notes}</span></div>` : ""}
+      </div>
+      <div class="footer">ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=500,height=700");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const filtered = filterByDate(payments, datePeriod).filter(p =>
     (!filterSupplier || p.supplier_id === +filterSupplier) &&
     (!filterMethod || p.payment_method === filterMethod)
   );
@@ -3194,13 +3265,14 @@ function PaymentsPage({ suppliers }) {
           </div>
         </div>
       )}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:12 }}>
         <div>
           <h2 style={{ fontSize:28, fontWeight:800 }}>Payments</h2>
           <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Money paid to suppliers</p>
         </div>
         <Btn onClick={() => setShowAdd(!showAdd)}>+ New Payment</Btn>
       </div>
+      <DateFilter value={datePeriod} onChange={setDatePeriod} />
 
       {/* Summary cards */}
       <div className="stats-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:16, marginBottom:24 }}>
@@ -3295,6 +3367,7 @@ function PaymentsPage({ suppliers }) {
                       <td>
                         <div style={{ display:"flex", gap:6 }}>
                           <button onClick={() => setEditPayment(p)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                          <button onClick={() => printPayment(p)} style={{ background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:6, padding:"4px 8px", color:T.green, fontSize:11, cursor:"pointer" }}>🖨️</button>
                           <button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
                         </div>
                       </td>
