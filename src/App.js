@@ -2437,10 +2437,52 @@ function Reports({ invoices, products, locations }) {
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
         <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${paidSells.length} paid sales`} />
         <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${sells.filter(i=>getStatus(i)!=="paid").length} pending`} />
-        <StatCard label="Net Profit (Paid)" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${revenue>0?((profit/revenue)*100).toFixed(1):0}% margin`} />
-        <StatCard label="Expected Profit" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit>=0?T.accent:T.red} sub="All invoices" />
+        <StatCard label="Net Profit (All)" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit>=0?T.green:T.red} sub="All invoices combined" />
         <StatCard label="Purchases" value={fmt(paidBuys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${paidBuys.length} orders`} />
         <StatCard label="Avg Sale" value={fmt(paidSells.length?revenue/paidSells.length:0)} icon="📊" color={T.accent} sub="per invoice" />
+      </div>
+
+      {/* Expected Profit per Invoice */}
+      <div style={{ marginBottom: 20, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: T.green }}>🎯 Expected Profit by Invoice</h3>
+          <span style={{ fontFamily: T.mono, color: T.green, fontWeight: 800 }}>Total: {fmt(expectedProfit)}</span>
+        </div>
+        <table>
+          <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Status</th><th>Revenue</th><th>Cost</th><th style={{ color:T.green }}>Profit</th><th>Margin</th></tr></thead>
+          <tbody>
+            {sells.map(inv => {
+              const invProfit = inv.profit || 0;
+              const invCogs = inv.cogs || 0;
+              const margin = inv.total > 0 ? ((invProfit/inv.total)*100).toFixed(1) : 0;
+              const status = getStatus(inv);
+              return (
+                <tr key={inv.id}>
+                  <td style={{ fontFamily:T.mono, color:T.accent, fontSize:12 }}>{inv.id}</td>
+                  <td style={{ fontSize:12, color:T.muted }}>{inv.date}</td>
+                  <td style={{ fontWeight:600 }}>{inv.customer}</td>
+                  <td><Badge color={status==="paid"?T.green:status==="partial"?T.yellow:T.red}>{status.toUpperCase()}</Badge></td>
+                  <td style={{ fontFamily:T.mono }}>{fmt(inv.total)}</td>
+                  <td style={{ fontFamily:T.mono, color:T.muted }}>{fmt(invCogs)}</td>
+                  <td style={{ fontFamily:T.mono, fontWeight:800, color:invProfit>=0?T.green:T.red, fontSize:14 }}>{fmt(invProfit)}</td>
+                  <td><span style={{ background:+margin>20?T.green+"22":T.yellow+"22", color:+margin>20?T.green:T.yellow, borderRadius:6, padding:"2px 8px", fontFamily:T.mono, fontSize:12 }}>{margin}%</span></td>
+                </tr>
+              );
+            })}
+            {sells.length === 0 && <tr><td colSpan={8} style={{ textAlign:"center", color:T.muted, padding:24 }}>No sales in this period</td></tr>}
+          </tbody>
+          {sells.length > 0 && (
+            <tfoot>
+              <tr style={{ background:T.green+"11", borderTop:`2px solid ${T.green}44` }}>
+                <td colSpan={4} style={{ fontWeight:700, color:T.green, padding:"12px 16px" }}>NET PROFIT (ALL INVOICES)</td>
+                <td style={{ fontFamily:T.mono, fontWeight:700 }}>{fmt(sells.reduce((s,i)=>s+i.total,0))}</td>
+                <td style={{ fontFamily:T.mono, fontWeight:700, color:T.muted }}>{fmt(sells.reduce((s,i)=>s+i.cogs,0))}</td>
+                <td style={{ fontFamily:T.mono, fontWeight:800, color:T.green, fontSize:16 }}>{fmt(expectedProfit)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
       </div>
 
       <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
