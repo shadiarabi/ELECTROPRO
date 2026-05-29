@@ -327,10 +327,15 @@ function PrintInvoice({ inv, locations, onClose }) {
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function Dashboard({ invoices, products, locations, userProfile }) {
   const sells = invoices.filter(i => i.type === "sell" && i.status === "paid");
+  const sellsPending = invoices.filter(i => i.type === "sell" && (i.status === "pending" || i.status === "partial"));
   const buys = invoices.filter(i => i.type === "buy" && i.status === "paid");
+  const buysPending = invoices.filter(i => i.type === "buy" && (i.status === "pending" || i.status === "partial"));
   const revenue = sells.reduce((s, i) => s + i.total, 0);
+  const revenuePending = sellsPending.reduce((s, i) => s + i.total - (i.amount_paid || 0), 0);
   const cogs = sells.reduce((s, i) => s + i.cogs, 0);
   const profit = revenue - cogs;
+  const purchasesPaid = buys.reduce((s, i) => s + i.total, 0);
+  const purchasesPending = buysPending.reduce((s, i) => s + i.total - (i.amount_paid || 0), 0);
   const totalItems = products.reduce((s, p) => s + (p.totalStock || 0), 0);
   const maxRev = Math.max(...locations.map(l => l.revenue || 0), 1);
   const canSeeFinancials = ["admin", "manager"].includes(userProfile?.role);
@@ -343,11 +348,34 @@ function Dashboard({ invoices, products, locations, userProfile }) {
         <span style={{ marginLeft: 8 }}><Badge color={userProfile?.role === "admin" ? T.red : userProfile?.role === "manager" ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></span>
       </p>
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        {canSeeFinancials && <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} sales`} />}
+        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} />}
+        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending sales`} />}
         {canSeeFinancials && <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} />}
-        {canSeeFinancials && <StatCard label="Purchases" value={fmt(buys.reduce((s, i) => s + i.total, 0))} icon="🛒" color={T.yellow} sub={`${buys.length} invoices`} />}
+        {canSeeFinancials && <StatCard label="Paid Purchases" value={fmt(purchasesPaid)} icon="✅" color={T.green} sub={`${buys.length} paid`} />}
+        {canSeeFinancials && <StatCard label="Pending Purchases" value={fmt(purchasesPending)} icon="🔴" color={T.red} sub={`${buysPending.length} pending`} />}
         <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} />
       </div>
+
+      {canSeeFinancials && revenuePending > 0 && (
+        <div style={{ background: T.yellow+"11", border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.yellow }}>⏳ Pending Collections from Clients</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{sellsPending.length} unpaid sales invoices</div>
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: T.yellow }}>{fmt(revenuePending)}</div>
+        </div>
+      )}
+
+      {canSeeFinancials && purchasesPending > 0 && (
+        <div style={{ background: T.red+"11", border: `1px solid ${T.red}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.red }}>🔴 Pending Payments to Suppliers</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{buysPending.length} unpaid purchase invoices</div>
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: T.red }}>{fmt(purchasesPending)}</div>
+        </div>
+      )}
+
       {canSeeFinancials && (
         <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 24 }}>
@@ -367,9 +395,11 @@ function Dashboard({ invoices, products, locations, userProfile }) {
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 24 }}>
             <h3 style={{ fontSize: 13, letterSpacing: 2, textTransform: "uppercase", color: T.muted, marginBottom: 20 }}>P&L Summary</h3>
             {[
-              { label: "Gross Revenue", val: revenue, color: T.green },
+              { label: "Paid Revenue", val: revenue, color: T.green },
+              { label: "Pending Revenue", val: revenuePending, color: T.yellow },
               { label: "Cost of Goods Sold", val: -cogs, color: T.red },
               { label: "Gross Profit", val: revenue - cogs, color: T.accent, bold: true },
+              { label: "Pending Purchases Due", val: -purchasesPending, color: T.red },
               { label: "Net Profit / Loss", val: profit, color: profit >= 0 ? T.green : T.red, bold: true },
             ].map((row, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
