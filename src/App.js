@@ -2528,7 +2528,6 @@ function ClientBalance({ clients, invoices, onRefresh }) {
           </div>
 
           <DateFilter value={datePeriod} onChange={setDatePeriod} />
-          <DateFilter value={datePeriod} onChange={setDatePeriod} />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700 }}>Payment History</h3>
             <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
@@ -2577,23 +2576,46 @@ function ClientBalance({ clients, invoices, onRefresh }) {
 
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
             <table>
-              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th>Amount</th><th>Actions</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Date</th><th>Description</th><th>Notes</th>
+                  <th style={{ color: T.red }}>Debit (Charged)</th>
+                  <th style={{ color: T.green }}>Credit (Paid)</th>
+                  <th style={{ color: T.accent }}>Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody>
-                {payments.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ fontFamily: T.mono, fontSize: 12 }}>{p.date}</td>
-                    <td><Badge color={p.type==="payment"?T.green:T.red}>{p.type==="payment"?"PAYMENT":"CHARGE"}</Badge></td>
-                    <td style={{ fontSize: 12, color: T.muted }}>{p.notes || "—"}</td>
-                    <td style={{ fontFamily: T.mono, color: p.type==="payment"?T.green:T.red, fontWeight: 700 }}>{p.type==="payment"?"+":"-"}{fmt(p.amount)}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => setEditPayment(p)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                        <button onClick={() => delPayment(p.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {payments.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No payment records yet</td></tr>}
+                {(() => {
+                  // Build combined ledger: invoices as debits, payments as credits
+                  const ledgerRows = [
+                    ...clientInvoices.map(inv => ({ date: inv.date, desc: `Invoice ${inv.id}`, notes: "", debit: inv.total, credit: 0, id: inv.id, isInv: true })),
+                    ...payments.map(p => ({ date: p.date, desc: p.type === "payment" ? "Payment Received" : "Additional Charge", notes: p.notes || "", debit: p.type === "charge" ? +p.amount : 0, credit: p.type === "payment" ? +p.amount : 0, id: p.id, isInv: false, raw: p })),
+                  ].sort((a, b) => a.date.localeCompare(b.date));
+                  let runningBalance = 0;
+                  return ledgerRows.map((row, i) => {
+                    runningBalance += row.debit - row.credit;
+                    return (
+                      <tr key={i} style={{ background: row.isInv ? T.surface+"88" : "transparent" }}>
+                        <td style={{ fontFamily: T.mono, fontSize: 12 }}>{row.date}</td>
+                        <td style={{ fontSize: 12, fontWeight: row.isInv ? 700 : 400, color: row.isInv ? T.accent : T.text }}>{row.desc}</td>
+                        <td style={{ fontSize: 12, color: T.muted }}>{row.notes || "—"}</td>
+                        <td style={{ fontFamily: T.mono, color: T.red, fontWeight: 700 }}>{row.debit > 0 ? fmt(row.debit) : "—"}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green, fontWeight: 700 }}>{row.credit > 0 ? fmt(row.credit) : "—"}</td>
+                        <td style={{ fontFamily: T.mono, fontWeight: 800, color: runningBalance > 0 ? T.red : T.green }}>{fmt(Math.abs(runningBalance))}{runningBalance > 0 ? " DR" : " CR"}</td>
+                        <td>
+                          {!row.isInv && (
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => setEditPayment(row.raw)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                              <button onClick={() => delPayment(row.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
+                {payments.length === 0 && clientInvoices.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No records yet</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2768,23 +2790,45 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
 
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
             <table>
-              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th>Amount</th><th>Actions</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Date</th><th>Description</th><th>Notes</th>
+                  <th style={{ color: T.red }}>Debit (Owed)</th>
+                  <th style={{ color: T.green }}>Credit (Paid)</th>
+                  <th style={{ color: T.accent }}>Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody>
-                {payments.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ fontFamily: T.mono, fontSize: 12 }}>{p.date}</td>
-                    <td><Badge color={p.type==="payment"?T.green:T.red}>{p.type==="payment"?"PAID":"CHARGE"}</Badge></td>
-                    <td style={{ fontSize: 12, color: T.muted }}>{p.notes || "—"}</td>
-                    <td style={{ fontFamily: T.mono, color: p.type==="payment"?T.green:T.red, fontWeight: 700 }}>{fmt(p.amount)}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => setEditPayment(p)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                        <button onClick={() => delPayment(p.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {payments.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No payment records yet</td></tr>}
+                {(() => {
+                  const ledgerRows = [
+                    ...supplierInvoices.map(inv => ({ date: inv.date, desc: `Invoice ${inv.id}`, notes: "", debit: inv.total, credit: 0, id: inv.id, isInv: true })),
+                    ...payments.map(p => ({ date: p.date, desc: p.type === "payment" ? "Payment Made" : "Additional Charge", notes: p.notes || "", debit: p.type === "charge" ? +p.amount : 0, credit: p.type === "payment" ? +p.amount : 0, id: p.id, isInv: false, raw: p })),
+                  ].sort((a, b) => a.date.localeCompare(b.date));
+                  let runningBalance = 0;
+                  return ledgerRows.map((row, i) => {
+                    runningBalance += row.debit - row.credit;
+                    return (
+                      <tr key={i} style={{ background: row.isInv ? T.surface+"88" : "transparent" }}>
+                        <td style={{ fontFamily: T.mono, fontSize: 12 }}>{row.date}</td>
+                        <td style={{ fontSize: 12, fontWeight: row.isInv ? 700 : 400, color: row.isInv ? T.accent : T.text }}>{row.desc}</td>
+                        <td style={{ fontSize: 12, color: T.muted }}>{row.notes || "—"}</td>
+                        <td style={{ fontFamily: T.mono, color: T.red, fontWeight: 700 }}>{row.debit > 0 ? fmt(row.debit) : "—"}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green, fontWeight: 700 }}>{row.credit > 0 ? fmt(row.credit) : "—"}</td>
+                        <td style={{ fontFamily: T.mono, fontWeight: 800, color: runningBalance > 0 ? T.red : T.green }}>{fmt(Math.abs(runningBalance))}{runningBalance > 0 ? " DR" : " CR"}</td>
+                        <td>
+                          {!row.isInv && (
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => setEditPayment(row.raw)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                              <button onClick={() => delPayment(row.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
+                {payments.length === 0 && supplierInvoices.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No records yet</td></tr>}
               </tbody>
             </table>
           </div>
