@@ -934,10 +934,99 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             )}
 
             {/* Summary */}
-            <div style={{ background:T.surface, borderRadius:8, padding:12, marginBottom:20, fontFamily:T.mono, fontSize:13 }}>
-              <div style={{ display:"flex", justifyContent:"space-between" }}>
+            <div style={{ background:T.surface, borderRadius:8, padding:12, marginBottom:16, fontFamily:T.mono, fontSize:13 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                 <span style={{ color:T.muted }}>Invoice Total</span>
                 <span style={{ fontWeight:800, color:T.accent }}>{fmt(editInv.total)}</span>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                <span style={{ color:T.muted }}>Total Paid</span>
+                <span style={{ fontWeight:700, color:T.green }}>{fmt((editInv.invPayments||[]).reduce((s,p)=>s+(+p.amount),0))}</span>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", borderTop:`1px solid ${T.border}`, paddingTop:6 }}>
+                <span style={{ color:T.muted }}>Remaining Balance</span>
+                <span style={{ fontWeight:800, color:T.red }}>{fmt(Math.max(0, editInv.total - (editInv.invPayments||[]).reduce((s,p)=>s+(+p.amount),0)))}</span>
+              </div>
+            </div>
+
+            {/* Payment History */}
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:12, color:T.accent, fontWeight:700, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>💳 Payment History</div>
+              {(editInv.invPayments||[]).length > 0 ? (
+                <div style={{ background:T.surface, borderRadius:8, overflow:"hidden", marginBottom:10 }}>
+                  <table>
+                    <thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Del</th></tr></thead>
+                    <tbody>
+                      {(editInv.invPayments||[]).map((p,i) => (
+                        <tr key={i}>
+                          <td style={{ fontSize:12, color:T.muted }}>{p.date}</td>
+                          <td><Badge color={p.payment_method==="cash_usd"?T.green:p.payment_method==="wallet_usdt"?T.accent:T.yellow}>{p.payment_method==="cash_usd"?"💵 Cash":p.payment_method==="wallet_usdt"?"💎 USDT":"🏦 Bank"}</Badge></td>
+                          <td style={{ fontSize:11, color:T.muted, fontFamily:T.mono }}>{p.reference||"—"}</td>
+                          <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{fmt(p.amount)}</td>
+                          <td><button onClick={async () => {
+                            const table = editInv.type==="sell" ? "client_payments" : "supplier_payments";
+                            await supabase.from(table).delete().eq("id", p.id);
+                            const newPmts = editInv.invPayments.filter((_,idx)=>idx!==i);
+                            const totalPd = newPmts.reduce((s,x)=>s+(+x.amount),0);
+                            const newStatus = totalPd<=0?"pending":totalPd>=editInv.total?"paid":"partial";
+                            await supabase.from("invoices").update({ payment_status:newStatus, status:newStatus, amount_paid:totalPd }).eq("id", editInv.id);
+                            setEditInv({...editInv, invPayments:newPmts, payment_status:newStatus, amount_paid:totalPd});
+                            onRefresh();
+                          }} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:4, padding:"3px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ fontSize:12, color:T.muted, marginBottom:10, padding:"8px 12px", background:T.surface, borderRadius:8 }}>No payments recorded yet</div>
+              )}
+
+              {/* Add new payment */}
+              <div style={{ background:T.surface, borderRadius:8, padding:14, border:`1px solid ${T.green}33` }}>
+                <div style={{ fontSize:12, color:T.green, fontWeight:700, marginBottom:10 }}>+ Add Payment</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:10, marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>DATE</div>
+                    <input type="date" value={editInv.newPmt?.date || new Date().toISOString().slice(0,10)} onChange={e => setEditInv({...editInv, newPmt:{...editInv.newPmt, date:e.target.value}})} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>AMOUNT ($)</div>
+                    <input type="number" value={editInv.newPmt?.amount || ""} onChange={e => setEditInv({...editInv, newPmt:{...editInv.newPmt, amount:e.target.value}})} placeholder="0.00" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>METHOD</div>
+                    <select value={editInv.newPmt?.method || "cash_usd"} onChange={e => setEditInv({...editInv, newPmt:{...editInv.newPmt, method:e.target.value}})}>
+                      <option value="cash_usd">💵 Cash USD</option>
+                      <option value="wallet_usdt">💎 Wallet USDT</option>
+                      <option value="bank_transfer">🏦 Bank Transfer</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>REFERENCE #</div>
+                    <input value={editInv.newPmt?.reference || ""} onChange={e => setEditInv({...editInv, newPmt:{...editInv.newPmt, reference:e.target.value}})} placeholder="Tx ID / Ref" />
+                  </div>
+                </div>
+                <button onClick={async () => {
+                  if (!editInv.newPmt?.amount) return;
+                  const pmt = { date: editInv.newPmt?.date || new Date().toISOString().slice(0,10), amount: +editInv.newPmt.amount, payment_method: editInv.newPmt?.method || "cash_usd", reference: editInv.newPmt?.reference || "", type: "payment" };
+                  // Save to correct table
+                  if (editInv.type === "sell" && editInv.client_id) {
+                    const { data } = await supabase.from("client_payments").insert({ client_id: editInv.client_id, ...pmt, notes: "" }).select().single();
+                    pmt.id = data?.id;
+                  } else if (editInv.type === "buy" && editInv.supplier_id) {
+                    const { data } = await supabase.from("supplier_payments").insert({ supplier_id: editInv.supplier_id, ...pmt, notes: "" }).select().single();
+                    pmt.id = data?.id;
+                  }
+                  const newPmts = [...(editInv.invPayments||[]), pmt];
+                  const totalPd = newPmts.reduce((s,p)=>s+(+p.amount),0);
+                  const newStatus = totalPd<=0?"pending":totalPd>=editInv.total?"paid":"partial";
+                  await supabase.from("invoices").update({ payment_status:newStatus, status:newStatus, amount_paid:totalPd }).eq("id", editInv.id);
+                  setEditInv({...editInv, invPayments:newPmts, payment_status:newStatus, amount_paid:totalPd, newPmt:null});
+                  onRefresh();
+                }} style={{ background:T.green, color:"#000", border:"none", borderRadius:8, padding:"8px 20px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                  + Record Payment
+                </button>
               </div>
             </div>
 
@@ -1232,7 +1321,16 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     </td>
                     <td><button onClick={async () => {
                       const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
-                      setEditInv({ ...inv, payment_status: inv.payment_status || inv.status || "paid", payment_method: inv.payment_method || "cash_usd", editItems: items || [] });
+                      // Load payment history
+                      let invPayments = [];
+                      if (inv.type === "sell" && inv.client_id) {
+                        const { data } = await supabase.from("client_payments").select("*").eq("client_id", inv.client_id).order("date", { ascending: true });
+                        invPayments = data || [];
+                      } else if (inv.type === "buy" && inv.supplier_id) {
+                        const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", inv.supplier_id).order("date", { ascending: true });
+                        invPayments = data || [];
+                      }
+                      setEditInv({ ...inv, payment_status: inv.payment_status || inv.status || "paid", payment_method: inv.payment_method || "cash_usd", editItems: items || [], invPayments });
                     }} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 10px", color:T.accent, fontSize:12, cursor:"pointer" }}>✏️</button></td>
                     <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
                     <td><button onClick={async () => {
