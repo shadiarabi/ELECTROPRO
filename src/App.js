@@ -1546,22 +1546,27 @@ function ClientsPage({ clients, onRefresh }) {
   const [form, setForm] = useState({ name: "", phone: "", email: "", address: "", notes: "" });
 
   const save = async () => {
-    if (!form.name) return;
-    setSaving(true);
     if (editClient) {
-      // If name changed, update invoices with this client
-      if (editClient.name !== form.name) {
-        await supabase.from("invoices").update({ customer: form.name }).eq("client_id", editClient.id);
+      if (!editClient.name) return;
+      setSaving(true);
+      if (editClient.name !== clients.find(c=>c.id===editClient.id)?.name) {
+        await supabase.from("invoices").update({ customer: editClient.name }).eq("client_id", editClient.id);
       }
-      await supabase.from("clients").update(form).eq("id", editClient.id);
+      await supabase.from("clients").update({
+        name: editClient.name, phone: editClient.phone||"", email: editClient.email||"",
+        address: editClient.address||"", notes: editClient.notes||""
+      }).eq("id", editClient.id);
       setEditClient(null);
     } else {
+      if (!form.name) return;
+      setSaving(true);
       await supabase.from("clients").insert(form);
       setShowAdd(false);
     }
     setForm({ name: "", phone: "", email: "", address: "", notes: "" });
     onRefresh();
     setSaving(false);
+  };
   };
 
   const del = async (id) => {
@@ -1612,7 +1617,7 @@ function ClientsPage({ clients, onRefresh }) {
                 <td className="hide-mobile" style={{ fontSize: 12, color: T.muted }}>{c.address || "—"}</td>
                 <td>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => { setEditClient(c); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                    <button onClick={() => { setEditClient(c); setForm({ name: c.name, phone: c.phone||"", email: c.email||"", address: c.address||"", notes: c.notes||"" }); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
                     <button onClick={() => del(c.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
                   </div>
                 </td>
@@ -1634,16 +1639,20 @@ function SuppliersPage({ suppliers, onRefresh }) {
   const [form, setForm] = useState({ name: "", phone: "", email: "", contact_person: "", address: "", notes: "" });
 
   const save = async () => {
-    if (!form.name) return;
-    setSaving(true);
     if (editSupplier) {
-      // If name changed, update invoices with this supplier
-      if (editSupplier.name !== form.name) {
-        await supabase.from("invoices").update({ customer: form.name }).eq("supplier_id", editSupplier.id);
+      if (!editSupplier.name) return;
+      setSaving(true);
+      if (editSupplier.name !== suppliers.find(s=>s.id===editSupplier.id)?.name) {
+        await supabase.from("invoices").update({ customer: editSupplier.name }).eq("supplier_id", editSupplier.id);
       }
-      await supabase.from("suppliers").update(form).eq("id", editSupplier.id);
+      await supabase.from("suppliers").update({
+        name: editSupplier.name, phone: editSupplier.phone||"", email: editSupplier.email||"",
+        contact_person: editSupplier.contact_person||"", address: editSupplier.address||"", notes: editSupplier.notes||""
+      }).eq("id", editSupplier.id);
       setEditSupplier(null);
     } else {
+      if (!form.name) return;
+      setSaving(true);
       await supabase.from("suppliers").insert(form);
       setShowAdd(false);
     }
@@ -1700,7 +1709,7 @@ function SuppliersPage({ suppliers, onRefresh }) {
                 <td className="hide-mobile" style={{ fontSize: 12, color: T.muted }}>{s.email || "—"}</td>
                 <td>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => { setEditSupplier(s); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                    <button onClick={() => { setEditSupplier(s); setForm({ name: s.name, phone: s.phone||"", email: s.email||"", contact_person: s.contact_person||"", address: s.address||"", notes: s.notes||"" }); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
                     <button onClick={() => del(s.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
                   </div>
                 </td>
