@@ -2508,6 +2508,38 @@ function ClientBalance({ clients, invoices, onRefresh }) {
     await reloadPayments();
   };
 
+  const printClientPayment = (p, clientName) => {
+    const html = `<!DOCTYPE html><html><head><title>Payment Record</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; max-width: 400px; margin: 0 auto; }
+      h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+      .box { border: 2px solid #000; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      .row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 700; }
+      .amount { font-size: 22px; font-weight: 800; color: #006600; text-align: center; padding: 16px; border: 2px solid #006600; border-radius: 8px; margin: 16px 0; }
+      .footer { text-align: center; font-size: 11px; color: #999; margin-top: 20px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="subtitle">${p.type === "payment" ? "RECEIPT VOUCHER" : "CHARGE VOUCHER"}</div>
+      <div class="amount">$${Number(p.amount).toFixed(2)}</div>
+      <div class="box">
+        <div class="row"><span class="label">Date</span><span class="value">${p.date}</span></div>
+        <div class="row"><span class="label">Client</span><span class="value">${clientName}</span></div>
+        <div class="row"><span class="label">Type</span><span class="value">${p.type === "payment" ? "Payment Received" : "Additional Charge"}</span></div>
+        ${p.notes ? `<div class="row"><span class="label">Notes</span><span class="value">${p.notes}</span></div>` : ""}
+      </div>
+      <div class="footer">Thank you! • ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=500,height=650");
+    w.document.write(html);
+    w.document.close();
+  };
+
   return (
     <div className="page">
       <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6 }}>Client Balance Sheet</h2>
@@ -2607,6 +2639,7 @@ function ClientBalance({ clients, invoices, onRefresh }) {
                           {!row.isInv && (
                             <div style={{ display: "flex", gap: 6 }}>
                               <button onClick={() => setEditPayment(row.raw)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                              <button onClick={() => printClientPayment(row.raw, clients.find(c=>c.id===selected)?.name||"")} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 6, padding: "4px 8px", color: T.green, fontSize: 11, cursor: "pointer" }}>🖨️</button>
                               <button onClick={() => delPayment(row.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
                             </div>
                           )}
@@ -2733,6 +2766,38 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
     await reloadPayments();
   };
 
+  const printSupplierPayment = (p, supplierName) => {
+    const html = `<!DOCTYPE html><html><head><title>Payment Voucher</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; max-width: 400px; margin: 0 auto; }
+      h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+      .box { border: 2px solid #000; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      .row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 700; }
+      .amount { font-size: 22px; font-weight: 800; color: #cc0000; text-align: center; padding: 16px; border: 2px solid #cc0000; border-radius: 8px; margin: 16px 0; }
+      .footer { text-align: center; font-size: 11px; color: #999; margin-top: 20px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="subtitle">${p.type === "payment" ? "PAYMENT VOUCHER" : "CHARGE VOUCHER"}</div>
+      <div class="amount">$${Number(p.amount).toFixed(2)}</div>
+      <div class="box">
+        <div class="row"><span class="label">Date</span><span class="value">${p.date}</span></div>
+        <div class="row"><span class="label">Supplier</span><span class="value">${supplierName}</span></div>
+        <div class="row"><span class="label">Type</span><span class="value">${p.type === "payment" ? "Payment Made" : "Additional Charge"}</span></div>
+        ${p.notes ? `<div class="row"><span class="label">Notes</span><span class="value">${p.notes}</span></div>` : ""}
+      </div>
+      <div class="footer">ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=500,height=650");
+    w.document.write(html);
+    w.document.close();
+  };
+
   return (
     <div className="page">
       <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6 }}>Supplier Balance Sheet</h2>
@@ -2830,6 +2895,7 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
                           {!row.isInv && (
                             <div style={{ display: "flex", gap: 6 }}>
                               <button onClick={() => setEditPayment(row.raw)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                              <button onClick={() => printSupplierPayment(row.raw, suppliers.find(s=>s.id===selected)?.name||"")} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 6, padding: "4px 8px", color: T.green, fontSize: 11, cursor: "pointer" }}>🖨️</button>
                               <button onClick={() => delPayment(row.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
                             </div>
                           )}
