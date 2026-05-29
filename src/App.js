@@ -517,7 +517,8 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
     setSaving(true);
     const oldProduct = products.find(p => p.id === editProduct.id);
     const nameChanged = oldProduct && oldProduct.name !== editProduct.name;
-    const skuChanged = oldProduct && oldProduct.sku !== editProduct.sku;
+    const costChanged = oldProduct && +oldProduct.cost_price !== +editProduct.cost_price;
+    const sellChanged = oldProduct && +oldProduct.sell_price !== +editProduct.sell_price;
 
     // Update product
     await supabase.from("products").update({
@@ -525,12 +526,16 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
       cost_price: +editProduct.cost_price, sell_price: +editProduct.sell_price
     }).eq("id", editProduct.id);
 
-    // If name changed, update everywhere it's stored
+    // Sync name everywhere
     if (nameChanged) {
-      // Update all invoice_items with this product
       await supabase.from("invoice_items").update({ product_name: editProduct.name }).eq("product_id", editProduct.id);
-      // Update all stock_transfers with this product
       await supabase.from("stock_transfers").update({ product_name: editProduct.name }).eq("product_id", editProduct.id);
+      await supabase.from("sales_order_items").update({ product_name: editProduct.name }).eq("product_id", editProduct.id);
+    }
+
+    // Sync cost price to invoice_items (so profit is always accurate)
+    if (costChanged) {
+      await supabase.from("invoice_items").update({ cost: +editProduct.cost_price }).eq("product_id", editProduct.id);
     }
 
     setEditProduct(null);
@@ -3346,10 +3351,12 @@ export default function App() {
       const discountAmt = inv.discount_type === "pct" ? subtotal * (inv.discount_value || 0) / 100 : (inv.discount_value || 0);
       const shipAmt = inv.shipment_type === "pct" ? subtotal * (inv.shipment_value || 0) / 100 : (inv.shipment_value || 0);
       const total = Math.max(0, subtotal - discountAmt) + shipAmt;
-      // Use current product cost price for accurate profit calculation
+      // Use stored cost (kept in sync with product cost_price via saveEdit)
+      // Fall back to current product cost if stored cost is 0 or missing
       const cogs = (inv.invoice_items || []).reduce((s, i) => {
+        const storedCost = i.cost || 0;
         const currentProd = (prods || []).find(p => p.id === i.product_id);
-        const costPrice = currentProd ? currentProd.cost_price : (i.cost || 0);
+        const costPrice = storedCost > 0 ? storedCost : (currentProd?.cost_price || 0);
         return s + i.quantity * costPrice;
       }, 0);
       const profit = inv.type === "sell" ? total - cogs : 0;
