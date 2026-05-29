@@ -28,8 +28,10 @@ const css = `
   .spinner { width:32px; height:32px; border:3px solid ${T.border}; border-top-color:${T.accent}; border-radius:50%; animation:spin .8s linear infinite; }
   @media print {
     .no-print { display: none !important; }
-    body { background: white; color: black; }
-    .print-invoice { display: block !important; }
+    body { background: white !important; color: black !important; margin: 0 !important; }
+    .print-invoice-overlay { position: static !important; background: none !important; display: block !important; }
+    .print-invoice-content { box-shadow: none !important; max-height: none !important; overflow: visible !important; border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
+    .print-invoice-buttons { display: none !important; }
   }
   @media (max-width: 768px) {
     .sidebar { width: 60px !important; }
@@ -260,9 +262,9 @@ function PrintInvoice({ inv, locations, onClose }) {
   const print = () => window.print();
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} className="no-print">
-      <div style={{ background: "white", color: "#000", borderRadius: 12, padding: 40, width: "100%", maxWidth: 600, maxHeight: "90vh", overflow: "auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+    <div className="print-invoice-overlay" style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="print-invoice-content" style={{ background: "white", color: "#000", borderRadius: 12, padding: 40, width: "100%", maxWidth: 600, maxHeight: "90vh", overflow: "auto" }}>
+        <div className="print-invoice-buttons" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h2 style={{ fontSize: 22, fontWeight: 800 }}>⚡ ElectroPro</h2>
           <div style={{ display: "flex", gap: 10 }}>
             <Btn small onClick={print} color="#000">🖨️ Print</Btn>
@@ -3126,7 +3128,7 @@ export default function App() {
   return (
     <>
       <style>{css}</style>
-      <div style={{ display: "flex", minHeight: "100vh" }}>
+      <div className="no-print" style={{ display: "flex", minHeight: "100vh" }}>
         <nav className="sidebar no-print" style={{ width: sidebarWidth, minWidth: 60, maxWidth: 320, background: T.surface, borderRight: `1px solid ${T.border}`, padding: "28px 0", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, transition: "none", overflowY: "auto", overflowX: "hidden" }}>
           <div style={{ padding: "0 16px 28px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.5, whiteSpace: "nowrap", overflow: "hidden" }}>
