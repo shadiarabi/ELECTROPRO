@@ -782,6 +782,12 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             cost: +i.cost
           }))
         );
+        // If this is a purchase, update product cost_price to new price
+        if (editInv.type === "buy") {
+          for (const item of editInv.editItems) {
+            await supabase.from("products").update({ cost_price: +item.price }).eq("id", +item.product_id);
+          }
+        }
       }
       // Recalculate total and update invoice
       const newTotal = editInv.editItems.reduce((s, i) => s + i.quantity * i.price, 0);
@@ -3289,7 +3295,12 @@ export default function App() {
       const discountAmt = inv.discount_type === "pct" ? subtotal * (inv.discount_value || 0) / 100 : (inv.discount_value || 0);
       const shipAmt = inv.shipment_type === "pct" ? subtotal * (inv.shipment_value || 0) / 100 : (inv.shipment_value || 0);
       const total = Math.max(0, subtotal - discountAmt) + shipAmt;
-      const cogs = (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.cost, 0);
+      // Use current product cost price for accurate profit calculation
+      const cogs = (inv.invoice_items || []).reduce((s, i) => {
+        const currentProd = (prods || []).find(p => p.id === i.product_id);
+        const costPrice = currentProd ? currentProd.cost_price : (i.cost || 0);
+        return s + i.quantity * costPrice;
+      }, 0);
       const profit = inv.type === "sell" ? total - cogs : 0;
       return { ...inv, total, cogs, profit, locationName: inv.locations?.name || "", invoice_items: undefined, locations: undefined };
     });
