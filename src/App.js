@@ -515,10 +515,24 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
   const saveEdit = async () => {
     if (!editProduct) return;
     setSaving(true);
+    const oldProduct = products.find(p => p.id === editProduct.id);
+    const nameChanged = oldProduct && oldProduct.name !== editProduct.name;
+    const skuChanged = oldProduct && oldProduct.sku !== editProduct.sku;
+
+    // Update product
     await supabase.from("products").update({
       name: editProduct.name, sku: editProduct.sku, category: editProduct.category,
       cost_price: +editProduct.cost_price, sell_price: +editProduct.sell_price
     }).eq("id", editProduct.id);
+
+    // If name changed, update everywhere it's stored
+    if (nameChanged) {
+      // Update all invoice_items with this product
+      await supabase.from("invoice_items").update({ product_name: editProduct.name }).eq("product_id", editProduct.id);
+      // Update all stock_transfers with this product
+      await supabase.from("stock_transfers").update({ product_name: editProduct.name }).eq("product_id", editProduct.id);
+    }
+
     setEditProduct(null);
     onRefresh();
     setSaving(false);
@@ -1533,6 +1547,10 @@ function ClientsPage({ clients, onRefresh }) {
     if (!form.name) return;
     setSaving(true);
     if (editClient) {
+      // If name changed, update invoices with this client
+      if (editClient.name !== form.name) {
+        await supabase.from("invoices").update({ customer: form.name }).eq("client_id", editClient.id);
+      }
       await supabase.from("clients").update(form).eq("id", editClient.id);
       setEditClient(null);
     } else {
@@ -1617,6 +1635,10 @@ function SuppliersPage({ suppliers, onRefresh }) {
     if (!form.name) return;
     setSaving(true);
     if (editSupplier) {
+      // If name changed, update invoices with this supplier
+      if (editSupplier.name !== form.name) {
+        await supabase.from("invoices").update({ customer: form.name }).eq("supplier_id", editSupplier.id);
+      }
       await supabase.from("suppliers").update(form).eq("id", editSupplier.id);
       setEditSupplier(null);
     } else {
