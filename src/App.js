@@ -54,17 +54,20 @@ const Badge = ({ children, color = T.accent }) => (
   <span style={{ background: color + "22", color, border: `1px solid ${color}44`, borderRadius: 4, padding: "2px 8px", fontSize: 11, fontFamily: T.mono, letterSpacing: 1 }}>{children}</span>
 );
 
-const StatCard = ({ label, value, sub, color = T.accent, icon }) => (
-  <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden" }}>
+const StatCard = ({ label, value, sub, color = T.accent, icon, onClick }) => (
+  <div onClick={onClick} style={{ background: T.card, border: `1px solid ${onClick ? color+"66" : T.border}`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "transform .15s, box-shadow .15s" }}
+    onMouseEnter={e => { if (onClick) { e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow=`0 8px 24px ${color}33`; }}}
+    onMouseLeave={e => { if (onClick) { e.currentTarget.style.transform=""; e.currentTarget.style.boxShadow=""; }}}>
     <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${color}, transparent)` }} />
     <div style={{ fontSize: 22, marginBottom: 8 }}>{icon}</div>
     <div style={{ fontSize: 26, fontWeight: 800, color, letterSpacing: -1 }}>{value}</div>
     <div style={{ fontSize: 12, color: T.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
     {sub && <div style={{ fontSize: 11, color: T.muted, marginTop: 6, fontFamily: T.mono }}>{sub}</div>}
+    {onClick && <div style={{ position: "absolute", bottom: 8, right: 12, fontSize: 10, color: color, opacity: 0.6 }}>tap to view →</div>}
   </div>
 );
 
-// ─── DATE FILTER BAR ─────────────────────────────────────────────────────────
+// ─── DATE FILTER ─────────────────────────────────────────────────────────────
 const DateFilter = ({ value, onChange }) => (
   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 14px", marginBottom: 20 }}>
     <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1, marginRight: 4 }}>📅 Filter:</span>
@@ -349,7 +352,7 @@ function PrintInvoice({ inv, locations, onClose }) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ invoices, products, locations, userProfile }) {
+function Dashboard({ invoices, products, locations, userProfile, setPage }) {
   const sells = invoices.filter(i => i.type === "sell" && i.status === "paid");
   const sellsPending = invoices.filter(i => i.type === "sell" && i.status !== "paid");
   const buys = invoices.filter(i => i.type === "buy" && i.status === "paid");
@@ -369,11 +372,11 @@ function Dashboard({ invoices, products, locations, userProfile }) {
         <span style={{ marginLeft: 8 }}><Badge color={userProfile?.role === "admin" ? T.red : userProfile?.role === "manager" ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></span>
       </p>
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} />}
-        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending`} />}
-        {canSeeFinancials && <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} />}
-        {canSeeFinancials && <StatCard label="Purchases" value={fmt(buys.reduce((s, i) => s + i.total, 0))} icon="🛒" color={T.accent} sub={`${buys.length} invoices`} />}
-        <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} />
+        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} onClick={() => setPage("invoices")} />}
+        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending`} onClick={() => setPage("invoices")} />}
+        {canSeeFinancials && <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} onClick={() => setPage("pl")} />}
+        {canSeeFinancials && <StatCard label="Purchases" value={fmt(buys.reduce((s, i) => s + i.total, 0))} icon="🛒" color={T.accent} sub={`${buys.length} invoices`} onClick={() => setPage("invoices")} />}
+        <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} onClick={() => setPage("inventory")} />
       </div>
       {canSeeFinancials && pendingRevenue > 0 && (
         <div style={{ background: T.yellow+"11", border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -2055,7 +2058,7 @@ function StockTransfer({ products, locations, onRefresh }) {
 }
 
 // ─── REPORTS ──────────────────────────────────────────────────────────────────
-function Reports({ invoices, products, locations }) {
+function Reports({ invoices, products, locations, setPage }) {
   const [period, setPeriod] = useState("all");
   const now = new Date();
 
@@ -2117,12 +2120,12 @@ function Reports({ invoices, products, locations }) {
       </div>
 
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} />
-        <StatCard label="Paid Revenue" value={fmt(paidRevenue)} icon="✅" color={T.green} sub={`${paidSells.length} paid`} />
-        <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sells.length - paidSells.length} pending`} />
-        <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} />
-        <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} />
-        <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" />
+        <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} onClick={() => setPage("invoices")} />
+        <StatCard label="Paid Revenue" value={fmt(paidRevenue)} icon="✅" color={T.green} sub={`${paidSells.length} paid`} onClick={() => setPage("invoices")} />
+        <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sells.length - paidSells.length} pending`} onClick={() => setPage("invoices")} />
+        <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} onClick={() => setPage("pl")} />
+        <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} onClick={() => setPage("invoices")} />
+        <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" onClick={() => setPage("invoices")} />
       </div>
 
       <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -2681,7 +2684,7 @@ function ReceiptsPage({ clients }) {
           </div>
         </div>
       )}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:12 }}>
         <div>
           <h2 style={{ fontSize:28, fontWeight:800 }}>Receipts</h2>
           <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Money received from clients</p>
@@ -2985,11 +2988,8 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [loading, setLoading] = useState(true);
 
-  // ESC key → go back to dashboard
   useEffect(() => {
-    const handleKey = (e) => {
-      if (e.key === "Escape" && page !== "dashboard") setPage("dashboard");
-    };
+    const handleKey = (e) => { if (e.key === "Escape" && page !== "dashboard") setPage("dashboard"); };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [page]);
@@ -3162,7 +3162,7 @@ export default function App() {
           )}
           {loading ? <Loader /> : (
             <>
-              {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} />}
+              {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} setPage={setPage} />}
               {page === "inventory" && <Inventory products={products} locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "transfer" && <StockTransfer products={products} locations={locations} onRefresh={loadData} />}
               {page === "clients" && <ClientsPage clients={clients} onRefresh={loadData} />}
@@ -3175,7 +3175,7 @@ export default function App() {
               {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} clients={clients} suppliers={suppliers} onRefresh={loadData} userProfile={userProfile} />}
               {page === "expenses" && <ExpensesPage locations={locations} onRefresh={loadData} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
-              {page === "reports" && <Reports invoices={invoices} products={products} locations={locations} />}
+              {page === "reports" && <Reports invoices={invoices} products={products} locations={locations} setPage={setPage} />}
               {page === "locations" && <LocationsPage products={products} invoices={invoices} locations={locations} />}
               {page === "manage-locations" && <LocationsManagement locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "users" && <UsersPage currentUser={userProfile} />}
