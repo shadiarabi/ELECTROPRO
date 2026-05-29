@@ -308,8 +308,10 @@ function PrintInvoice({ inv, locations, onClose }) {
         ${discountAmt > 0 ? `<div class="row" style="color:red"><span>Discount${inv.discount_type==="pct"?` (${inv.discount_value}%)`:""}</span><span>−$${discountAmt.toFixed(2)}</span></div>` : ""}
         ${shipAmt > 0 ? `<div class="row" style="color:#0066cc"><span>Shipment${inv.shipment_type==="pct"?` (${inv.shipment_value}%)`:""}</span><span>+$${shipAmt.toFixed(2)}</span></div>` : ""}
         <div class="row total"><span>TOTAL</span><span>$${Number(total).toFixed(2)}</span></div>
-        ${inv.payment_method ? `<div class="row"><span>Payment</span><span>${{cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[inv.payment_method]||""}</span></div>` : ""}
+        ${inv.payment_method ? `<div class="row"><span>Supplier Payment</span><span>${{cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[inv.payment_method]||""}</span></div>` : ""}
         ${inv.payment_reference ? `<div class="row"><span>Reference</span><span>${inv.payment_reference}</span></div>` : ""}
+        ${inv.shipment_company ? `<div class="row"><span>Shipping Co.</span><span>${inv.shipment_company}</span></div>` : ""}
+        ${inv.shipment_payment_status ? `<div class="row"><span>Shipment Payment</span><span>${inv.shipment_payment_status === "paid" ? ({cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[inv.shipment_payment_method]||"Paid") : "⏳ Pending"}</span></div>` : ""}
       </div></div>
       <div class="footer">Thank you for your business! • ElectroPro Business Manager</div>
       <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
@@ -389,12 +391,22 @@ function PrintInvoice({ inv, locations, onClose }) {
               </div>
               {inv.payment_method && (
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, marginTop: 4, color: "#333" }}>
-                  <span>Payment</span><span style={{ fontWeight: 700 }}>{pmLabel[inv.payment_method] || ""}</span>
+                  <span>{inv.type === "buy" ? "Supplier Payment" : "Payment"}</span><span style={{ fontWeight: 700 }}>{pmLabel[inv.payment_method] || ""}</span>
                 </div>
               )}
               {inv.payment_reference && (
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, color: "#666" }}>
                   <span>Reference</span><span style={{ fontFamily: "monospace" }}>{inv.payment_reference}</span>
+                </div>
+              )}
+              {inv.shipment_company && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13, color: "#333" }}>
+                  <span>Shipping Co.</span><span style={{ fontWeight: 700 }}>{inv.shipment_company}</span>
+                </div>
+              )}
+              {inv.shipment_payment_status && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13, color: inv.shipment_payment_status === "paid" ? "#007700" : "#cc4400" }}>
+                  <span>Shipment Payment</span><span style={{ fontWeight: 700 }}>{inv.shipment_payment_status === "paid" ? (pmLabel[inv.shipment_payment_method] || "Paid") : "⏳ Pending"}</span>
                 </div>
               )}
             </div>
@@ -785,7 +797,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const [saving, setSaving] = useState(false);
   const [printInv, setPrintInv] = useState(null);
   const [editInv, setEditInv] = useState(null);
-  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
+  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, shipmentCompany: "", shipmentPaymentStatus: "pending", shipmentPaymentMethod: "cash_usd", paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
   const filtered = filterByDate(invoices, datePeriod)
@@ -825,6 +837,9 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       payment_reference: newInv.paymentReference || null,
       discount_type: newInv.discountType, discount_value: +newInv.discountValue || 0,
       shipment_type: newInv.shipmentType, shipment_value: +newInv.shipmentValue || 0,
+      shipment_company: newInv.shipmentCompany || null,
+      shipment_payment_status: newInv.type === "buy" && shipmentAmt > 0 ? newInv.shipmentPaymentStatus : null,
+      shipment_payment_method: newInv.type === "buy" && shipmentAmt > 0 && newInv.shipmentPaymentStatus !== "pending" ? newInv.shipmentPaymentMethod : null,
       client_id: newInv.client_id ? +newInv.client_id : null,
       supplier_id: newInv.supplier_id ? +newInv.supplier_id : null,
     });
@@ -864,7 +879,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         }
       }
       setShowCreate(false);
-      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
+      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, shipmentCompany: "", shipmentPaymentStatus: "pending", shipmentPaymentMethod: "cash_usd", paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
       onRefresh();
     }
     setSaving(false);
@@ -1098,7 +1113,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
           {newInv.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: T.accent, fontWeight: 700, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>🚢 Shipment Fees</div>
-              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
                 <select value={newInv.shipmentType} onChange={e => setNewInv({ ...newInv, shipmentType: e.target.value })} style={{ width: "auto" }}>
                   <option value="fixed">Fixed Amount ($)</option>
                   <option value="pct">Percentage (% of subtotal)</option>
@@ -1106,23 +1121,61 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                 <input type="number" value={newInv.shipmentValue} onChange={e => setNewInv({ ...newInv, shipmentValue: e.target.value })} placeholder="0" style={{ width: 120 }} min="0" />
                 {shipmentAmt > 0 && <span style={{ fontFamily: T.mono, fontSize: 13, color: T.accent }}>+ {fmt(shipmentAmt)} shipment</span>}
               </div>
-              {newInv.type === "buy" && shipmentAmt > 0 && (
-                <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, background: T.card, borderRadius: 8, padding: "10px 14px", border: `1px solid ${newInv.distributeShipment ? T.yellow+"66" : T.border}` }}>
-                  <input type="checkbox" id="distShip" checked={newInv.distributeShipment} onChange={e => setNewInv({ ...newInv, distributeShipment: e.target.checked })} style={{ width: 16, height: 16, cursor: "pointer" }} />
-                  <label htmlFor="distShip" style={{ fontSize: 13, color: newInv.distributeShipment ? T.yellow : T.muted, cursor: "pointer", fontWeight: newInv.distributeShipment ? 700 : 400 }}>
-                    📦 Distribute {fmt(shipmentAmt)} shipping cost to product cost prices
-                  </label>
-                  {newInv.distributeShipment && (
-                    <div style={{ marginLeft: "auto", fontSize: 11, color: T.muted }}>
-                      {newInv.items.map(item => {
-                        const itemValue = +item.qty * item.price;
-                        const total = newInv.items.reduce((s,i) => s + +i.qty * i.price, 0);
-                        const share = total > 0 ? shipmentAmt * (itemValue / total) / +item.qty : 0;
-                        return <div key={item.productId}>{item.name}: +{fmt(share)}/unit</div>;
-                      })}
-                    </div>
-                  )}
+              {shipmentAmt > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Shipping Company Name</div>
+                  <input value={newInv.shipmentCompany} onChange={e => setNewInv({ ...newInv, shipmentCompany: e.target.value })} placeholder="e.g. DHL, FedEx, local carrier..." style={{ maxWidth: 280 }} />
                 </div>
+              )}
+              {newInv.type === "buy" && shipmentAmt > 0 && (
+                <>
+                  <div style={{ background: T.card, borderRadius: 8, padding: 12, marginBottom: 12, border: `1px solid ${T.accent}33` }}>
+                    <div style={{ fontSize: 11, color: T.accent, fontWeight: 700, marginBottom: 10, textTransform: "uppercase" }}>💳 Shipment Payment (separate from supplier)</div>
+                    <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>Payment Status to Shipping Company</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                      {[
+                        { val: "pending", label: "⏳ Pending", color: T.red },
+                        { val: "paid", label: "✅ Paid", color: T.green },
+                      ].map(opt => (
+                        <button key={opt.val} onClick={() => setNewInv({ ...newInv, shipmentPaymentStatus: opt.val })} style={{ background: newInv.shipmentPaymentStatus === opt.val ? opt.color+"33" : "transparent", color: newInv.shipmentPaymentStatus === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.shipmentPaymentStatus === opt.val ? opt.color : T.border}`, borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {newInv.shipmentPaymentStatus === "paid" && (
+                      <div>
+                        <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>Shipment Payment Method</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {[
+                            { val: "cash_usd", label: "💵 Cash USD", color: T.green },
+                            { val: "wallet_usdt", label: "💎 Wallet USDT", color: T.accent },
+                            { val: "bank_transfer", label: "🏦 Bank Transfer", color: T.yellow },
+                          ].map(opt => (
+                            <button key={opt.val} onClick={() => setNewInv({ ...newInv, shipmentPaymentMethod: opt.val })} style={{ background: newInv.shipmentPaymentMethod === opt.val ? opt.color+"33" : "transparent", color: newInv.shipmentPaymentMethod === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.shipmentPaymentMethod === opt.val ? opt.color : T.border}`, borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 10, background: T.card, borderRadius: 8, padding: "10px 14px", border: `1px solid ${newInv.distributeShipment ? T.yellow+"66" : T.border}` }}>
+                    <input type="checkbox" id="distShip" checked={newInv.distributeShipment} onChange={e => setNewInv({ ...newInv, distributeShipment: e.target.checked })} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                    <label htmlFor="distShip" style={{ fontSize: 13, color: newInv.distributeShipment ? T.yellow : T.muted, cursor: "pointer", fontWeight: newInv.distributeShipment ? 700 : 400 }}>
+                      📦 Distribute {fmt(shipmentAmt)} to product cost prices
+                    </label>
+                    {newInv.distributeShipment && (
+                      <div style={{ marginLeft: "auto", fontSize: 11, color: T.muted }}>
+                        {newInv.items.map(item => {
+                          const itemValue = +item.qty * item.price;
+                          const total = newInv.items.reduce((s,i) => s + +i.qty * i.price, 0);
+                          const share = total > 0 ? shipmentAmt * (itemValue / total) / +item.qty : 0;
+                          return <div key={item.productId}>{item.name}: +{fmt(share)}/unit</div>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -1162,7 +1215,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
           {/* Payment Section — for all invoices when items exist */}
           {newInv.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16, border: `1px solid ${T.yellow}33` }}>
-              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 }}>💳 Payment Details</div>
+              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 }}>💳 {newInv.type === "buy" ? "Supplier Payment" : "Payment Details"}</div>
 
               {/* Payment Status — for both sales and purchases */}
               <div style={{ marginBottom: 14 }}>
