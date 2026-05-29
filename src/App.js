@@ -2985,14 +2985,19 @@ function PaymentsPage({ suppliers }) {
 
 // ─── APP SHELL ────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState("dashboard");
+  const [pageHistory, setPageHistory] = useState(["dashboard"]);
+  const page = pageHistory[pageHistory.length - 1];
   const [loading, setLoading] = useState(true);
 
+  const setPage = (newPage) => setPageHistory(prev => [...prev, newPage]);
+  const goBack = () => setPageHistory(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+
+  // ESC key → go back one page
   useEffect(() => {
-    const handleKey = (e) => { if (e.key === "Escape" && page !== "dashboard") setPage("dashboard"); };
+    const handleKey = (e) => { if (e.key === "Escape" && pageHistory.length > 1) goBack(); };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [page]);
+  }, [pageHistory]);
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -3131,7 +3136,7 @@ export default function App() {
           </div>
           <div style={{ padding: "12px 8px", flex: 1 }}>
             {NAV.map(n => (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", background: page === n.id ? T.accentDim : "transparent", color: page === n.id ? T.accent : T.muted, border: "none", borderRadius: 8, fontSize: 12, fontWeight: page === n.id ? 700 : 400, textAlign: "left", marginBottom: 2, transition: "all .15s", borderLeft: page === n.id ? `2px solid ${T.accent}` : "2px solid transparent", whiteSpace: "nowrap", overflow: "hidden" }}>
+              <button key={n.id} onClick={() => setPageHistory([n.id])} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", background: page === n.id ? T.accentDim : "transparent", color: page === n.id ? T.accent : T.muted, border: "none", borderRadius: 8, fontSize: 12, fontWeight: page === n.id ? 700 : 400, textAlign: "left", marginBottom: 2, transition: "all .15s", borderLeft: page === n.id ? `2px solid ${T.accent}` : "2px solid transparent", whiteSpace: "nowrap", overflow: "hidden" }}>
                 <span style={{ flexShrink: 0 }}>{n.icon}</span>
                 <span className="nav-label" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
               </button>
@@ -3153,11 +3158,11 @@ export default function App() {
         </div>
 
         <main className="main-content" style={{ flex: 1, padding: "28px 32px", overflowY: "auto", overflowX: "auto", minWidth: 0 }}>
-          {!loading && page !== "dashboard" && (
-            <button onClick={() => setPage("dashboard")} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 14px", color: T.muted, fontSize: 12, cursor: "pointer", marginBottom: 16, transition: "all .15s" }}
+          {!loading && pageHistory.length > 1 && (
+            <button onClick={goBack} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 14px", color: T.muted, fontSize: 12, cursor: "pointer", marginBottom: 16, transition: "all .15s" }}
               onMouseEnter={e => { e.currentTarget.style.borderColor=T.accent; e.currentTarget.style.color=T.accent; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor=T.border; e.currentTarget.style.color=T.muted; }}>
-              ← Dashboard &nbsp;<span style={{ fontSize: 10, opacity: 0.5 }}>ESC</span>
+              ← Back &nbsp;<span style={{ fontSize: 10, opacity: 0.5 }}>ESC</span>
             </button>
           )}
           {loading ? <Loader /> : (
