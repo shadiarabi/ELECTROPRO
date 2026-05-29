@@ -2173,7 +2173,13 @@ function ClientBalance({ clients, invoices, onRefresh }) {
   const [payments, setPayments] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
+
+  const reloadPayments = async () => {
+    const { data } = await supabase.from("client_payments").select("*").eq("client_id", selected).order("date", { ascending: false });
+    setPayments(data || []);
+  };
 
   useEffect(() => {
     if (selected) {
@@ -2187,34 +2193,48 @@ function ClientBalance({ clients, invoices, onRefresh }) {
   const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
   const balance = totalCharged + totalCharges - totalPaid;
 
+  const refreshInvoices = async () => {
+    const { data: allPayments } = await supabase.from("client_payments").select("*").eq("client_id", selected);
+    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
+    const allInvoices = invoices.filter(i => i.type==="sell" && i.client_id === selected);
+    // Reset all invoices first
+    for (const inv of allInvoices) {
+      await supabase.from("invoices").update({ payment_status: "pending", status: "pending", amount_paid: 0 }).eq("id", inv.id);
+    }
+    let remaining = newTotalPaid;
+    for (const inv of allInvoices) {
+      if (remaining >= inv.total) { await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id); remaining -= inv.total; }
+      else if (remaining > 0) { await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id); remaining = 0; }
+    }
+    onRefresh();
+  };
+
   const save = async () => {
     if (!form.amount || !selected) return;
     setSaving(true);
     await supabase.from("client_payments").insert({ client_id: selected, date: form.date, amount: +form.amount, type: form.type, notes: form.notes });
-
-    // Recalculate total paid after this payment
-    const { data: allPayments } = await supabase.from("client_payments").select("*").eq("client_id", selected);
-    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
-
-    // Auto-update pending/partial invoices for this client
-    const pendingInvoices = clientInvoices.filter(i => i.payment_status !== "paid");
-    let remaining = newTotalPaid;
-    for (const inv of pendingInvoices) {
-      if (remaining >= inv.total) {
-        await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id);
-        remaining -= inv.total;
-      } else if (remaining > 0) {
-        await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id);
-        remaining = 0;
-      }
-    }
-
+    await refreshInvoices();
     setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
     setShowAdd(false);
-    const { data } = await supabase.from("client_payments").select("*").eq("client_id", selected).order("date", { ascending: false });
-    setPayments(data || []);
-    onRefresh(); // Refresh invoices list too
+    await reloadPayments();
     setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editPayment) return;
+    setSaving(true);
+    await supabase.from("client_payments").update({ date: editPayment.date, amount: +editPayment.amount, type: editPayment.type, notes: editPayment.notes }).eq("id", editPayment.id);
+    await refreshInvoices();
+    setEditPayment(null);
+    await reloadPayments();
+    setSaving(false);
+  };
+
+  const delPayment = async (id) => {
+    if (!window.confirm("Delete this payment record?")) return;
+    await supabase.from("client_payments").delete().eq("id", id);
+    await refreshInvoices();
+    await reloadPayments();
   };
 
   return (
@@ -2261,9 +2281,30 @@ function ClientBalance({ clients, invoices, onRefresh }) {
             </div>
           )}
 
+          {editPayment && (
+            <div style={{ background: T.card, border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 20, marginBottom: 16 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: T.yellow }}>✏️ Edit Payment</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DATE</div><input type="date" value={editPayment.date} onChange={e => setEditPayment({...editPayment,date:e.target.value})} /></div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>TYPE</div>
+                  <select value={editPayment.type} onChange={e => setEditPayment({...editPayment,type:e.target.value})}>
+                    <option value="payment">Payment Received</option>
+                    <option value="charge">Additional Charge</option>
+                  </select>
+                </div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>AMOUNT ($)</div><input type="number" value={editPayment.amount} onChange={e => setEditPayment({...editPayment,amount:e.target.value})} /></div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>NOTES</div><input value={editPayment.notes||""} onChange={e => setEditPayment({...editPayment,notes:e.target.value})} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                <Btn small onClick={saveEdit} loading={saving}>Save Changes</Btn>
+                <Btn small outline onClick={() => setEditPayment(null)}>Cancel</Btn>
+              </div>
+            </div>
+          )}
+
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
             <table>
-              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th>Amount</th></tr></thead>
+              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th>Amount</th><th>Actions</th></tr></thead>
               <tbody>
                 {payments.map(p => (
                   <tr key={p.id}>
@@ -2271,9 +2312,15 @@ function ClientBalance({ clients, invoices, onRefresh }) {
                     <td><Badge color={p.type==="payment"?T.green:T.red}>{p.type==="payment"?"PAYMENT":"CHARGE"}</Badge></td>
                     <td style={{ fontSize: 12, color: T.muted }}>{p.notes || "—"}</td>
                     <td style={{ fontFamily: T.mono, color: p.type==="payment"?T.green:T.red, fontWeight: 700 }}>{p.type==="payment"?"+":"-"}{fmt(p.amount)}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setEditPayment(p)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                        <button onClick={() => delPayment(p.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
-                {payments.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No payment records yet</td></tr>}
+                {payments.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No payment records yet</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2317,7 +2364,13 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
   const [payments, setPayments] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
+
+  const reloadPayments = async () => {
+    const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: false });
+    setPayments(data || []);
+  };
 
   useEffect(() => {
     if (selected) {
@@ -2331,34 +2384,47 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
   const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
   const balance = totalOwed + totalCharges - totalPaid;
 
+  const refreshInvoices = async () => {
+    const { data: allPayments } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected);
+    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
+    const allInvoices = invoices.filter(i => i.type==="buy" && i.supplier_id === selected);
+    for (const inv of allInvoices) {
+      await supabase.from("invoices").update({ payment_status: "pending", status: "pending", amount_paid: 0 }).eq("id", inv.id);
+    }
+    let remaining = newTotalPaid;
+    for (const inv of allInvoices) {
+      if (remaining >= inv.total) { await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id); remaining -= inv.total; }
+      else if (remaining > 0) { await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id); remaining = 0; }
+    }
+    onRefresh();
+  };
+
   const save = async () => {
     if (!form.amount || !selected) return;
     setSaving(true);
     await supabase.from("supplier_payments").insert({ supplier_id: selected, date: form.date, amount: +form.amount, type: form.type, notes: form.notes });
-
-    // Recalculate total paid after this payment
-    const { data: allPayments } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected);
-    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
-
-    // Auto-update pending/partial invoices for this supplier
-    const pendingInvoices = supplierInvoices.filter(i => i.payment_status !== "paid");
-    let remaining = newTotalPaid;
-    for (const inv of pendingInvoices) {
-      if (remaining >= inv.total) {
-        await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id);
-        remaining -= inv.total;
-      } else if (remaining > 0) {
-        await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id);
-        remaining = 0;
-      }
-    }
-
+    await refreshInvoices();
     setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
     setShowAdd(false);
-    const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: false });
-    setPayments(data || []);
-    onRefresh(); // Refresh invoices list too
+    await reloadPayments();
     setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editPayment) return;
+    setSaving(true);
+    await supabase.from("supplier_payments").update({ date: editPayment.date, amount: +editPayment.amount, type: editPayment.type, notes: editPayment.notes }).eq("id", editPayment.id);
+    await refreshInvoices();
+    setEditPayment(null);
+    await reloadPayments();
+    setSaving(false);
+  };
+
+  const delPayment = async (id) => {
+    if (!window.confirm("Delete this payment record?")) return;
+    await supabase.from("supplier_payments").delete().eq("id", id);
+    await refreshInvoices();
+    await reloadPayments();
   };
 
   return (
@@ -2405,9 +2471,30 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
             </div>
           )}
 
+          {editPayment && (
+            <div style={{ background: T.card, border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 20, marginBottom: 16 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: T.yellow }}>✏️ Edit Payment</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DATE</div><input type="date" value={editPayment.date} onChange={e => setEditPayment({...editPayment,date:e.target.value})} /></div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>TYPE</div>
+                  <select value={editPayment.type} onChange={e => setEditPayment({...editPayment,type:e.target.value})}>
+                    <option value="payment">Payment Made</option>
+                    <option value="charge">Additional Charge</option>
+                  </select>
+                </div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>AMOUNT ($)</div><input type="number" value={editPayment.amount} onChange={e => setEditPayment({...editPayment,amount:e.target.value})} /></div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>NOTES</div><input value={editPayment.notes||""} onChange={e => setEditPayment({...editPayment,notes:e.target.value})} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                <Btn small onClick={saveEdit} loading={saving}>Save Changes</Btn>
+                <Btn small outline onClick={() => setEditPayment(null)}>Cancel</Btn>
+              </div>
+            </div>
+          )}
+
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
             <table>
-              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th>Amount</th></tr></thead>
+              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th>Amount</th><th>Actions</th></tr></thead>
               <tbody>
                 {payments.map(p => (
                   <tr key={p.id}>
@@ -2415,9 +2502,15 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
                     <td><Badge color={p.type==="payment"?T.green:T.red}>{p.type==="payment"?"PAID":"CHARGE"}</Badge></td>
                     <td style={{ fontSize: 12, color: T.muted }}>{p.notes || "—"}</td>
                     <td style={{ fontFamily: T.mono, color: p.type==="payment"?T.green:T.red, fontWeight: 700 }}>{fmt(p.amount)}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setEditPayment(p)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                        <button onClick={() => delPayment(p.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
-                {payments.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No payment records yet</td></tr>}
+                {payments.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No payment records yet</td></tr>}
               </tbody>
             </table>
           </div>
