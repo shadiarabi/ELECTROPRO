@@ -968,11 +968,11 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
               </div>
               <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                 <span style={{ color:T.muted }}>Total Paid</span>
-                <span style={{ fontWeight:700, color:T.green }}>{fmt((editInv.invPayments||[]).reduce((s,p)=>s+(+p.amount),0))}</span>
+                <span style={{ fontWeight:700, color:T.green }}>{fmt(Math.max((editInv.invPayments||[]).reduce((s,p)=>s+(+p.amount),0), editInv.amount_paid || 0))}</span>
               </div>
               <div style={{ display:"flex", justifyContent:"space-between", borderTop:`1px solid ${T.border}`, paddingTop:6 }}>
                 <span style={{ color:T.muted }}>Remaining Balance</span>
-                <span style={{ fontWeight:800, color:T.red }}>{fmt(Math.max(0, editInv.total - (editInv.invPayments||[]).reduce((s,p)=>s+(+p.amount),0)))}</span>
+                <span style={{ fontWeight:800, color:T.red }}>{fmt(Math.max(0, editInv.total - Math.max((editInv.invPayments||[]).reduce((s,p)=>s+(+p.amount),0), editInv.amount_paid || 0)))}</span>
               </div>
             </div>
 
@@ -1036,8 +1036,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                 </div>
                 <button onClick={async () => {
                   if (!editInv.newPmt?.amount) return;
-                  const pmt = { date: editInv.newPmt?.date || new Date().toISOString().slice(0,10), amount: +editInv.newPmt.amount, payment_method: editInv.newPmt?.method || "cash_usd", reference: editInv.newPmt?.reference || "", type: "payment" };
-                  // Save to correct table
+                  const pmt = { date: editInv.newPmt?.date || new Date().toISOString().slice(0,10), amount: +editInv.newPmt.amount, payment_method: editInv.newPmt?.method || "cash_usd", reference: editInv.newPmt?.reference || "", type: "payment", invoice_id: editInv.id };
+                  // Save to correct table with invoice_id
                   if (editInv.type === "sell" && editInv.client_id) {
                     const { data } = await supabase.from("client_payments").insert({ client_id: editInv.client_id, ...pmt, notes: "" }).select().single();
                     pmt.id = data?.id;
@@ -1348,16 +1348,19 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     </td>
                     <td><button onClick={async () => {
                       const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
-                      // Load payment history
+                      // Load ONLY payments linked to this specific invoice
                       let invPayments = [];
                       if (inv.type === "sell" && inv.client_id) {
-                        const { data } = await supabase.from("client_payments").select("*").eq("client_id", inv.client_id).order("date", { ascending: true });
+                        const { data } = await supabase.from("client_payments").select("*").eq("client_id", inv.client_id).eq("invoice_id", inv.id).order("date", { ascending: true });
                         invPayments = data || [];
                       } else if (inv.type === "buy" && inv.supplier_id) {
-                        const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", inv.supplier_id).order("date", { ascending: true });
+                        const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", inv.supplier_id).eq("invoice_id", inv.id).order("date", { ascending: true });
                         invPayments = data || [];
                       }
-                      setEditInv({ ...inv, payment_status: inv.payment_status || inv.status || "paid", payment_method: inv.payment_method || "cash_usd", editItems: items || [], invPayments });
+                      // Use amount_paid from invoice as fallback if no linked payments
+                      const totalFromPayments = invPayments.reduce((s,p)=>s+(+p.amount),0);
+                      const totalPaid = totalFromPayments > 0 ? totalFromPayments : (inv.amount_paid || 0);
+                      setEditInv({ ...inv, payment_status: inv.payment_status || inv.status || "paid", payment_method: inv.payment_method || "cash_usd", editItems: items || [], invPayments, totalPaid });
                     }} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 10px", color:T.accent, fontSize:12, cursor:"pointer" }}>✏️</button></td>
                     <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
                     <td><button onClick={async () => {
