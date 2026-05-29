@@ -54,18 +54,39 @@ const Badge = ({ children, color = T.accent }) => (
   <span style={{ background: color + "22", color, border: `1px solid ${color}44`, borderRadius: 4, padding: "2px 8px", fontSize: 11, fontFamily: T.mono, letterSpacing: 1 }}>{children}</span>
 );
 
-const StatCard = ({ label, value, sub, color = T.accent, icon, onClick }) => (
-  <div onClick={onClick} style={{ background: T.card, border: `1px solid ${onClick ? color+"66" : T.border}`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "transform .15s, box-shadow .15s" }}
-    onMouseEnter={e => { if (onClick) { e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow=`0 8px 24px ${color}33`; }}}
-    onMouseLeave={e => { if (onClick) { e.currentTarget.style.transform=""; e.currentTarget.style.boxShadow=""; }}}>
+const StatCard = ({ label, value, sub, color = T.accent, icon }) => (
+  <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden" }}>
     <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${color}, transparent)` }} />
     <div style={{ fontSize: 22, marginBottom: 8 }}>{icon}</div>
     <div style={{ fontSize: 26, fontWeight: 800, color, letterSpacing: -1 }}>{value}</div>
     <div style={{ fontSize: 12, color: T.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
     {sub && <div style={{ fontSize: 11, color: T.muted, marginTop: 6, fontFamily: T.mono }}>{sub}</div>}
-    {onClick && <div style={{ position: "absolute", bottom: 8, right: 12, fontSize: 10, color: color, opacity: 0.6 }}>tap to view →</div>}
   </div>
 );
+
+// ─── DATE FILTER BAR ─────────────────────────────────────────────────────────
+const DateFilter = ({ value, onChange }) => (
+  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 14px", marginBottom: 20 }}>
+    <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1, marginRight: 4 }}>📅 Filter:</span>
+    {[["all","All Time"],["today","Today"],["this_week","This Week"],["this_month","This Month"],["last_month","Last Month"],["this_year","This Year"]].map(([v,l]) => (
+      <button key={v} onClick={() => onChange(v)} style={{ background: value===v ? T.accent : "transparent", color: value===v ? "#000" : T.muted, border: `1px solid ${value===v ? T.accent : T.border}`, borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: value===v ? 700 : 400, cursor: "pointer" }}>{l}</button>
+    ))}
+  </div>
+);
+
+const filterByDate = (items, period, dateKey = "date") => {
+  if (period === "all") return items;
+  const now = new Date();
+  return items.filter(i => {
+    const d = new Date(i[dateKey]);
+    if (period === "today") return d.toDateString() === now.toDateString();
+    if (period === "this_week") { const w = new Date(now); w.setDate(now.getDate()-7); return d >= w; }
+    if (period === "this_month") return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();
+    if (period === "last_month") { const lm=new Date(now.getFullYear(),now.getMonth()-1); return d.getMonth()===lm.getMonth()&&d.getFullYear()===lm.getFullYear(); }
+    if (period === "this_year") return d.getFullYear()===now.getFullYear();
+    return true;
+  });
+};
 
 const Btn = ({ children, onClick, color = T.accent, outline, small, disabled, loading }) => (
   <button onClick={onClick} disabled={disabled || loading} style={{
@@ -328,7 +349,7 @@ function PrintInvoice({ inv, locations, onClose }) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ invoices, products, locations, userProfile, setPage }) {
+function Dashboard({ invoices, products, locations, userProfile }) {
   const sells = invoices.filter(i => i.type === "sell" && i.status === "paid");
   const sellsPending = invoices.filter(i => i.type === "sell" && i.status !== "paid");
   const buys = invoices.filter(i => i.type === "buy" && i.status === "paid");
@@ -348,11 +369,11 @@ function Dashboard({ invoices, products, locations, userProfile, setPage }) {
         <span style={{ marginLeft: 8 }}><Badge color={userProfile?.role === "admin" ? T.red : userProfile?.role === "manager" ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></span>
       </p>
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} onClick={() => setPage("invoices")} />}
-        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending`} onClick={() => setPage("invoices")} />}
-        {canSeeFinancials && <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} onClick={() => setPage("pl")} />}
-        {canSeeFinancials && <StatCard label="Purchases" value={fmt(buys.reduce((s, i) => s + i.total, 0))} icon="🛒" color={T.accent} sub={`${buys.length} invoices`} onClick={() => setPage("invoices")} />}
-        <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} onClick={() => setPage("inventory")} />
+        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} />}
+        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending`} />}
+        {canSeeFinancials && <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} />}
+        {canSeeFinancials && <StatCard label="Purchases" value={fmt(buys.reduce((s, i) => s + i.total, 0))} icon="🛒" color={T.accent} sub={`${buys.length} invoices`} />}
+        <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} />
       </div>
       {canSeeFinancials && pendingRevenue > 0 && (
         <div style={{ background: T.yellow+"11", border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -626,6 +647,7 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
 // ─── INVOICES ─────────────────────────────────────────────────────────────────
 function Invoices({ invoices, setInvoices, products, locations, clients, suppliers, onRefresh, userProfile }) {
   const [typeFilter, setTypeFilter] = useState("all");
+  const [datePeriod, setDatePeriod] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [printInv, setPrintInv] = useState(null);
@@ -633,7 +655,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
-  const filtered = invoices.filter(i => typeFilter === "all" || i.type === typeFilter)
+  const filtered = filterByDate(invoices, datePeriod)
+    .filter(i => typeFilter === "all" || i.type === typeFilter)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const addItem = () => {
@@ -820,13 +843,14 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 28, fontWeight: 800 }}>Invoices</h2>
-          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{invoices.length} total invoices</p>
+          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{filtered.length} of {invoices.length} invoices</p>
         </div>
         <Btn onClick={() => setShowCreate(!showCreate)}>+ New Invoice</Btn>
       </div>
+      <DateFilter value={datePeriod} onChange={setDatePeriod} />
 
       {showCreate && (
         <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 24, marginBottom: 24 }}>
@@ -2031,7 +2055,7 @@ function StockTransfer({ products, locations, onRefresh }) {
 }
 
 // ─── REPORTS ──────────────────────────────────────────────────────────────────
-function Reports({ invoices, products, locations, setPage }) {
+function Reports({ invoices, products, locations }) {
   const [period, setPeriod] = useState("all");
   const now = new Date();
 
@@ -2093,12 +2117,12 @@ function Reports({ invoices, products, locations, setPage }) {
       </div>
 
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} onClick={() => setPage("invoices")} />
-        <StatCard label="Paid Revenue" value={fmt(paidRevenue)} icon="✅" color={T.green} sub={`${paidSells.length} paid`} onClick={() => setPage("invoices")} />
-        <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sells.length - paidSells.length} pending`} onClick={() => setPage("invoices")} />
-        <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} onClick={() => setPage("pl")} />
-        <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} onClick={() => setPage("invoices")} />
-        <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" onClick={() => setPage("invoices")} />
+        <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} />
+        <StatCard label="Paid Revenue" value={fmt(paidRevenue)} icon="✅" color={T.green} sub={`${paidSells.length} paid`} />
+        <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sells.length - paidSells.length} pending`} />
+        <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} />
+        <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} />
+        <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" />
       </div>
 
       <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -2195,7 +2219,8 @@ function ClientBalance({ clients, invoices, onRefresh }) {
     }
   }, [selected]);
 
-  const clientInvoices = invoices.filter(i => i.type==="sell" && i.client_id === selected);
+  const [datePeriod, setDatePeriod] = useState("all");
+  const clientInvoices = filterByDate(invoices.filter(i => i.type==="sell" && i.client_id === selected), datePeriod);
   const totalCharged = clientInvoices.reduce((s,i)=>s+i.total,0);
   const totalPaid = payments.filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
   const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
@@ -2264,6 +2289,8 @@ function ClientBalance({ clients, invoices, onRefresh }) {
             <StatCard label="Balance Due" value={fmt(balance)} icon="💳" color={balance>0?T.red:T.green} sub={balance>0?"Outstanding":"Fully paid"} />
           </div>
 
+          <DateFilter value={datePeriod} onChange={setDatePeriod} />
+          <DateFilter value={datePeriod} onChange={setDatePeriod} />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700 }}>Payment History</h3>
             <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
@@ -2386,7 +2413,8 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
     }
   }, [selected]);
 
-  const supplierInvoices = invoices.filter(i => i.type==="buy" && i.supplier_id === selected);
+  const [datePeriod, setDatePeriod] = useState("all");
+  const supplierInvoices = filterByDate(invoices.filter(i => i.type==="buy" && i.supplier_id === selected), datePeriod);
   const totalOwed = supplierInvoices.reduce((s,i)=>s+i.total,0);
   const totalPaid = payments.filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
   const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
@@ -2569,6 +2597,7 @@ function ReceiptsPage({ clients }) {
   const [editReceipt, setEditReceipt] = useState(null);
   const [filterClient, setFilterClient] = useState("");
   const [filterMethod, setFilterMethod] = useState("");
+  const [datePeriod, setDatePeriod] = useState("all");
   const [form, setForm] = useState({ client_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
 
   const load = async () => {
@@ -2617,7 +2646,7 @@ function ReceiptsPage({ clients }) {
     load();
   };
 
-  const filtered = receipts.filter(r =>
+  const filtered = filterByDate(receipts, datePeriod).filter(r =>
     (!filterClient || r.client_id === +filterClient) &&
     (!filterMethod || r.payment_method === filterMethod)
   );
@@ -2652,13 +2681,14 @@ function ReceiptsPage({ clients }) {
           </div>
         </div>
       )}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:12 }}>
         <div>
           <h2 style={{ fontSize:28, fontWeight:800 }}>Receipts</h2>
           <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Money received from clients</p>
         </div>
         <Btn onClick={() => setShowAdd(!showAdd)}>+ New Receipt</Btn>
       </div>
+      <DateFilter value={datePeriod} onChange={setDatePeriod} />
 
       {/* Summary cards */}
       <div className="stats-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:16, marginBottom:24 }}>
@@ -2954,6 +2984,15 @@ function PaymentsPage({ suppliers }) {
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [loading, setLoading] = useState(true);
+
+  // ESC key → go back to dashboard
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === "Escape" && page !== "dashboard") setPage("dashboard");
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [page]);
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -3114,9 +3153,16 @@ export default function App() {
         </div>
 
         <main className="main-content" style={{ flex: 1, padding: "28px 32px", overflowY: "auto", overflowX: "auto", minWidth: 0 }}>
+          {!loading && page !== "dashboard" && (
+            <button onClick={() => setPage("dashboard")} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 14px", color: T.muted, fontSize: 12, cursor: "pointer", marginBottom: 16, transition: "all .15s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor=T.accent; e.currentTarget.style.color=T.accent; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor=T.border; e.currentTarget.style.color=T.muted; }}>
+              ← Dashboard &nbsp;<span style={{ fontSize: 10, opacity: 0.5 }}>ESC</span>
+            </button>
+          )}
           {loading ? <Loader /> : (
             <>
-              {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} setPage={setPage} />}
+              {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} />}
               {page === "inventory" && <Inventory products={products} locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "transfer" && <StockTransfer products={products} locations={locations} onRefresh={loadData} />}
               {page === "clients" && <ClientsPage clients={clients} onRefresh={loadData} />}
@@ -3129,7 +3175,7 @@ export default function App() {
               {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} clients={clients} suppliers={suppliers} onRefresh={loadData} userProfile={userProfile} />}
               {page === "expenses" && <ExpensesPage locations={locations} onRefresh={loadData} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
-              {page === "reports" && <Reports invoices={invoices} products={products} locations={locations} setPage={setPage} />}
+              {page === "reports" && <Reports invoices={invoices} products={products} locations={locations} />}
               {page === "locations" && <LocationsPage products={products} invoices={invoices} locations={locations} />}
               {page === "manage-locations" && <LocationsManagement locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "users" && <UsersPage currentUser={userProfile} />}
