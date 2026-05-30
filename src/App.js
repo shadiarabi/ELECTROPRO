@@ -55,15 +55,17 @@ const Badge = ({ children, color = T.accent }) => (
 );
 
 const StatCard = ({ label, value, sub, color = T.accent, icon, onClick }) => (
-  <div onClick={onClick} style={{ background: T.card, border: `1px solid ${onClick ? color+"66" : T.border}`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "transform .15s, box-shadow .15s" }}
+  <div onClick={onClick} style={{ background: T.card, border: `1px solid ${onClick ? color+"66" : T.border}`, borderRadius: 12, padding: "16px 20px", position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "transform .15s, box-shadow .15s", minHeight: 120, display: "flex", flexDirection: "column", justifyContent: "space-between" }}
     onMouseEnter={e => { if (onClick) { e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow=`0 8px 24px ${color}33`; }}}
     onMouseLeave={e => { if (onClick) { e.currentTarget.style.transform=""; e.currentTarget.style.boxShadow=""; }}}>
     <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${color}, transparent)` }} />
-    <div style={{ fontSize: 22, marginBottom: 8 }}>{icon}</div>
-    <div style={{ fontSize: 26, fontWeight: 800, color, letterSpacing: -1 }}>{value}</div>
-    <div style={{ fontSize: 12, color: T.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
-    {sub && <div style={{ fontSize: 11, color: T.muted, marginTop: 6, fontFamily: T.mono }}>{sub}</div>}
-    {onClick && <div style={{ position: "absolute", bottom: 8, right: 12, fontSize: 10, color: color, opacity: 0.6 }}>tap to view →</div>}
+    <div style={{ fontSize: 18, marginBottom: 4 }}>{icon}</div>
+    <div style={{ fontSize: 22, fontWeight: 800, color, letterSpacing: -0.5, wordBreak: "break-all", lineHeight: 1.2 }}>{value}</div>
+    <div>
+      <div style={{ fontSize: 11, color: T.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+      {sub && <div style={{ fontSize: 10, color: T.muted, marginTop: 2, fontFamily: T.mono }}>{sub}</div>}
+    </div>
+    {onClick && <div style={{ position: "absolute", bottom: 6, right: 10, fontSize: 9, color: color, opacity: 0.6 }}>tap to view →</div>}
   </div>
 );
 
@@ -2703,16 +2705,19 @@ function Reports({ invoices, products, locations, setPage }) {
         </select>
       </div>
 
-      <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
+      {/* Main stat cards - row 1 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
         <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} onClick={() => setPage("invoices")} />
         <StatCard label="Collected" value={fmt(paidRevenue)} icon="✅" color={T.accent} sub={`${paidSells.length} paid`} onClick={() => setPage("invoices")} />
         <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sells.length - paidSells.length} pending`} onClick={() => setPage("invoices")} />
         <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} onClick={() => setPage("pl")} />
+      </div>
+      {/* Main stat cards - row 2 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
         <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} onClick={() => setPage("invoices")} />
         <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" onClick={() => setPage("invoices")} />
-        <StatCard label="BSM Profit Total" value={fmt(bsmTotalProfit)} icon="🏦" color={T.green} sub={`${bsmInvoices.length} invoices`} />
-        <StatCard label="BSM On Account" value={fmt(bsmOnAccount)} icon="✅" color={T.accent} sub="credited" />
-        <StatCard label="BSM Pending" value={fmt(bsmPending)} icon="⏳" color={T.yellow} sub="not yet credited" />
+        <StatCard label="BSM Profit" value={fmt(bsmTotalProfit)} icon="🏦" color={T.green} sub={`${bsmInvoices.length} invoices`} />
+        <StatCard label="BSM Pending" value={fmt(bsmPending)} icon="⏳" color={bsmPending>0?T.yellow:T.green} sub={bsmPending>0?"not yet credited":"all credited"} />
       </div>
 
       <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
