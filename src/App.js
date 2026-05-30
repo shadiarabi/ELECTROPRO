@@ -1023,11 +1023,10 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const saveEdit = async () => {
     if (!editInv) return;
     setSaving(true);
-    // Recalculate totals from editItems
-    const items = editInv.editItems || [];
+    const items = editInv.editItems || editInv.invoice_items || [];
     const subtotal = items.reduce((s, i) => s + i.quantity * i.price, 0);
-    const discAmt = editInv.discount_type === "pct" ? subtotal * (editInv.discount_value||0)/100 : (editInv.discount_value||0);
-    const shipAmt = editInv.shipment_type === "pct" ? subtotal * (editInv.shipment_value||0)/100 : (editInv.shipment_value||0);
+    const discAmt = editInv.discount_type === "pct" ? subtotal * (editInv.discount_value||0)/100 : (+editInv.discount_value||0);
+    const shipAmt = editInv.shipment_type === "pct" ? subtotal * (editInv.shipment_value||0)/100 : (+editInv.shipment_value||0);
     const newTotal = Math.max(0, subtotal - discAmt + shipAmt);
     const cogs = items.reduce((s, i) => s + i.quantity * (i.cost||0), 0);
     const amountPaid = editInv.payment_status === "paid"
@@ -1045,18 +1044,19 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       payment_method: editInv.payment_status === "pending" ? null : editInv.payment_method,
       payment_reference: editInv.payment_reference || null,
       notes: editInv.notes || null,
-      discount_type: editInv.discount_type,
+      discount_type: editInv.discount_type || "fixed",
       discount_value: +editInv.discount_value || 0,
-      shipment_type: editInv.shipment_type,
+      shipment_type: editInv.shipment_type || "fixed",
       shipment_value: +editInv.shipment_value || 0,
+      shipment_company: editInv.shipment_company || null,
       total: newTotal,
       cogs: cogs,
       profit: newTotal - cogs,
     }).eq("id", editInv.id);
-    // Update invoice items
-    if (items.length > 0) {
+    // Update invoice items if changed
+    if (editInv.editItems) {
       await supabase.from("invoice_items").delete().eq("invoice_id", editInv.id);
-      await supabase.from("invoice_items").insert(items.map(i => ({
+      await supabase.from("invoice_items").insert(editInv.editItems.map(i => ({
         invoice_id: editInv.id, product_id: i.product_id, product_name: i.product_name,
         quantity: +i.quantity, price: +i.price, original_price: i.original_price || i.price,
         discount_pct: i.discount_pct || 0, cost: i.cost || 0,
@@ -1071,13 +1071,13 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
     <div className="page">
       {printInv && <PrintInvoice inv={printInv} locations={locations} onClose={() => setPrintInv(null)} />}
 
-      {/* Edit Invoice Modal */}
+      {/* Edit Invoice Modal - Full */}
       {editInv && (
         <div style={{ position:"fixed", inset:0, background:"#000a", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-          <div style={{ background:T.card, border:`1px solid ${T.accent}44`, borderRadius:16, padding:28, width:"100%", maxWidth:800, maxHeight:"90vh", overflowY:"auto" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.accent}44`, borderRadius:16, padding:28, width:"100%", maxWidth:820, maxHeight:"92vh", overflowY:"auto" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
               <h3 style={{ fontSize:16, fontWeight:700, color:T.accent }}>✏️ Edit Invoice</h3>
-              <button onClick={() => setEditInv(null)} style={{ background:"transparent", border:"none", color:T.muted, fontSize:20, cursor:"pointer" }}>×</button>
+              <button onClick={() => setEditInv(null)} style={{ background:"transparent", border:"none", color:T.muted, fontSize:22, cursor:"pointer", lineHeight:1 }}>×</button>
             </div>
             <p style={{ fontSize:12, color:T.muted, marginBottom:20, fontFamily:T.mono }}>{editInv.id} · {editInv.type === "sell" ? "Sale" : "Purchase"}</p>
 
@@ -1103,41 +1103,37 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
               </div>
             </div>
 
-            {/* Items */}
+            {/* Items Table */}
             <div style={{ marginBottom:16 }}>
               <div style={{ fontSize:12, color:T.accent, fontWeight:700, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>📦 Items</div>
               <div style={{ background:T.surface, borderRadius:10, overflow:"hidden", marginBottom:10 }}>
                 <table>
                   <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Disc%</th><th>Total</th><th></th></tr></thead>
                   <tbody>
-                    {(editInv.editItems||[]).map((item, i) => (
+                    {(editInv.editItems||editInv.invoice_items||[]).map((item, i) => (
                       <tr key={i}>
                         <td style={{ fontSize:13 }}>{item.product_name}</td>
-                        <td><input type="number" value={item.quantity} min="1" onChange={e => { const items=[...(editInv.editItems||[])]; items[i]={...items[i],quantity:+e.target.value}; setEditInv({...editInv,editItems:items}); }} style={{ width:60, padding:"4px 6px" }} /></td>
-                        <td><input type="number" value={item.price} min="0" step="0.01" onChange={e => { const items=[...(editInv.editItems||[])]; items[i]={...items[i],price:+e.target.value}; setEditInv({...editInv,editItems:items}); }} style={{ width:100, padding:"4px 6px" }} /></td>
-                        <td><input type="number" value={item.discount_pct||0} min="0" max="100" onChange={e => { const items=[...(editInv.editItems||[])]; items[i]={...items[i],discount_pct:+e.target.value, price: (item.original_price||item.price)*(1-(+e.target.value)/100)}; setEditInv({...editInv,editItems:items}); }} style={{ width:60, padding:"4px 6px" }} /></td>
+                        <td><input type="number" value={item.quantity} min="1" onChange={e => { const items=[...(editInv.editItems||editInv.invoice_items||[])]; items[i]={...items[i],quantity:+e.target.value}; setEditInv({...editInv,editItems:items}); }} style={{ width:60, padding:"4px 6px" }} /></td>
+                        <td><input type="number" value={item.price} min="0" step="0.01" onChange={e => { const items=[...(editInv.editItems||editInv.invoice_items||[])]; items[i]={...items[i],price:+e.target.value}; setEditInv({...editInv,editItems:items}); }} style={{ width:100, padding:"4px 6px" }} /></td>
+                        <td><input type="number" value={item.discount_pct||0} min="0" max="100" onChange={e => { const items=[...(editInv.editItems||editInv.invoice_items||[])]; const op=item.original_price||item.price; items[i]={...items[i],discount_pct:+e.target.value,price:op*(1-(+e.target.value)/100)}; setEditInv({...editInv,editItems:items}); }} style={{ width:60, padding:"4px 6px" }} /></td>
                         <td style={{ fontFamily:T.mono, fontWeight:700, color:T.green }}>{fmt(item.quantity*item.price)}</td>
-                        <td><button onClick={() => { const items=(editInv.editItems||[]).filter((_,j)=>j!==i); setEditInv({...editInv,editItems:items}); }} style={{ background:T.red+"22", border:"none", borderRadius:4, padding:"2px 8px", color:T.red, cursor:"pointer" }}>×</button></td>
+                        <td><button onClick={() => { const items=(editInv.editItems||editInv.invoice_items||[]).filter((_,j)=>j!==i); setEditInv({...editInv,editItems:items}); }} style={{ background:T.red+"22", border:"none", borderRadius:4, padding:"2px 8px", color:T.red, cursor:"pointer", fontSize:14 }}>×</button></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {/* Add item to edit */}
-              <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-                <select onChange={e => {
-                  const prod = products.find(p => p.id === +e.target.value);
-                  if (!prod) return;
-                  const items = [...(editInv.editItems||[])];
-                  const price = editInv.type === "sell" ? prod.sell_price : prod.cost_price;
-                  items.push({ product_id: prod.id, product_name: prod.name, quantity: 1, price, original_price: price, discount_pct: 0, cost: prod.cost_price });
-                  setEditInv({...editInv, editItems: items});
-                  e.target.value = "";
-                }} style={{ flex:1, minWidth:160 }} defaultValue="">
-                  <option value="">+ Add product...</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
+              <select onChange={e => {
+                const prod = products.find(p => p.id === +e.target.value);
+                if (!prod) return;
+                const existing = editInv.editItems||editInv.invoice_items||[];
+                const price = editInv.type === "sell" ? prod.sell_price : prod.cost_price;
+                setEditInv({...editInv, editItems:[...existing,{ product_id:prod.id, product_name:prod.name, quantity:1, price, original_price:price, discount_pct:0, cost:prod.cost_price }]});
+                e.target.value = "";
+              }} style={{ minWidth:200 }} defaultValue="">
+                <option value="">+ Add product...</option>
+                {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
             </div>
 
             {/* Discount & Shipment */}
@@ -1154,29 +1150,38 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
               </div>
               <div style={{ background:T.surface, borderRadius:10, padding:14 }}>
                 <div style={{ fontSize:11, color:T.muted, marginBottom:8, textTransform:"uppercase" }}>🚢 Shipment</div>
-                <div style={{ display:"flex", gap:8 }}>
+                <div style={{ display:"flex", gap:8, marginBottom: editInv.type==="buy" ? 10 : 0 }}>
                   <select value={editInv.shipment_type||"fixed"} onChange={e => setEditInv({...editInv,shipment_type:e.target.value})} style={{ width:"auto" }}>
                     <option value="fixed">Fixed ($)</option>
                     <option value="pct">Percent (%)</option>
                   </select>
                   <input type="number" value={editInv.shipment_value||0} min="0" onChange={e => setEditInv({...editInv,shipment_value:e.target.value})} style={{ width:90 }} />
                 </div>
+                {editInv.type === "buy" && (
+                  <div>
+                    <div style={{ fontSize:10, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Shipping Company</div>
+                    <select value={editInv.shipment_company||""} onChange={e => setEditInv({...editInv,shipment_company:e.target.value})} style={{ width:"100%", fontSize:12 }}>
+                      <option value="">None</option>
+                      {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                    </select>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Live Total */}
             {(() => {
-              const items = editInv.editItems || [];
-              const subtotal = items.reduce((s,i)=>s+i.quantity*i.price,0);
-              const discAmt = editInv.discount_type==="pct" ? subtotal*(editInv.discount_value||0)/100 : (+editInv.discount_value||0);
-              const shipAmt = editInv.shipment_type==="pct" ? subtotal*(editInv.shipment_value||0)/100 : (+editInv.shipment_value||0);
-              const total = Math.max(0, subtotal - discAmt + shipAmt);
+              const its = editInv.editItems||editInv.invoice_items||[];
+              const sub = its.reduce((s,i)=>s+i.quantity*i.price,0);
+              const disc = editInv.discount_type==="pct" ? sub*(editInv.discount_value||0)/100 : (+editInv.discount_value||0);
+              const ship = editInv.shipment_type==="pct" ? sub*(editInv.shipment_value||0)/100 : (+editInv.shipment_value||0);
+              const tot = Math.max(0, sub - disc + ship);
               return (
                 <div style={{ background:T.surface, borderRadius:10, padding:14, marginBottom:16, fontFamily:T.mono }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6, fontSize:13 }}><span style={{ color:T.muted }}>Subtotal</span><span>{fmt(subtotal)}</span></div>
-                  {discAmt > 0 && <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6, fontSize:13 }}><span style={{ color:T.red }}>Discount</span><span style={{ color:T.red }}>− {fmt(discAmt)}</span></div>}
-                  {shipAmt > 0 && <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6, fontSize:13 }}><span style={{ color:T.accent }}>Shipment</span><span style={{ color:T.accent }}>+ {fmt(shipAmt)}</span></div>}
-                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:16, fontWeight:800, borderTop:`1px solid ${T.border}`, paddingTop:8 }}><span>TOTAL</span><span style={{ color:T.green }}>{fmt(total)}</span></div>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4, fontSize:13 }}><span style={{ color:T.muted }}>Subtotal</span><span>{fmt(sub)}</span></div>
+                  {disc>0 && <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4, fontSize:13 }}><span style={{ color:T.red }}>Discount</span><span style={{ color:T.red }}>− {fmt(disc)}</span></div>}
+                  {ship>0 && <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4, fontSize:13 }}><span style={{ color:T.accent }}>Shipment</span><span style={{ color:T.accent }}>+ {fmt(ship)}</span></div>}
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:16, fontWeight:800, borderTop:`1px solid ${T.border}`, paddingTop:8, marginTop:4 }}><span>TOTAL</span><span style={{ color:T.green }}>{fmt(tot)}</span></div>
                 </div>
               );
             })()}
