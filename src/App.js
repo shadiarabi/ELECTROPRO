@@ -1062,6 +1062,29 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         discount_pct: i.discount_pct || 0, cost: i.cost || 0,
       })));
     }
+
+    // Handle partial payment breakdown — record supplier and shipment payments
+    if (editInv.payment_status === "partial") {
+      // Supplier payment
+      if (editInv.supplier_id && +editInv.partial_supplier > 0) {
+        const payId = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
+        await supabase.from("supplier_payments").insert({ supplier_id: +editInv.supplier_id, date: editInv.date, amount: +editInv.partial_supplier, type: "payment", notes: `Partial payment for ${editInv.id}`, payment_method: editInv.partial_supplier_method||"cash_usd" });
+        await supabase.from("payments").insert({ id: payId, supplier_id: +editInv.supplier_id, date: editInv.date, amount: +editInv.partial_supplier, payment_method: editInv.partial_supplier_method||"cash_usd", notes: `Partial for ${editInv.id}` });
+      }
+      // Shipment payment
+      if (editInv.shipment_company && +editInv.partial_ship > 0) {
+        const { data: shipSupp } = await supabase.from("suppliers").select("id").ilike("name", editInv.shipment_company).single();
+        if (shipSupp) {
+          const payId2 = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
+          await supabase.from("supplier_payments").insert({ supplier_id: shipSupp.id, date: editInv.date, amount: +editInv.partial_ship, type: "payment", notes: `Shipment payment for ${editInv.id}`, payment_method: editInv.partial_ship_method||"cash_usd" });
+          await supabase.from("payments").insert({ id: payId2, supplier_id: shipSupp.id, date: editInv.date, amount: +editInv.partial_ship, payment_method: editInv.partial_ship_method||"cash_usd", notes: `Shipment for ${editInv.id}` });
+        }
+      }
+      // Update amount_paid to total of all partial payments
+      const totalPartialPaid = (+editInv.partial_supplier||0) + (+editInv.partial_ship||0) + (+editInv.partial_bsm||0);
+      await supabase.from("invoices").update({ amount_paid: totalPartialPaid }).eq("id", editInv.id);
+    }
+
     setEditInv(null);
     onRefresh();
     setSaving(false);
@@ -1188,8 +1211,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
 
             {/* Payment Status */}
             <div style={{ marginBottom:16 }}>
-              <div style={{ fontSize:11, color:T.muted, marginBottom:8, textTransform:"uppercase" }}>Payment Status</div>
-              <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+              <div style={{ fontSize:11, color:T.muted, marginBottom:8, textTransform:"uppercase" }}>💳 Payment Status</div>
+              <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:12 }}>
                 {[
                   { val:"pending", label:"⏳ Pending", color:T.red },
                   { val:"partial", label:"🔶 Partial", color:T.yellow },
@@ -1200,45 +1223,92 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                   </button>
                 ))}
               </div>
-              {editInv.payment_status === "partial" && (
+
+              {/* PARTIAL PAYMENT BREAKDOWN */}
+              {editInv.payment_status === "partial" && (() => {
+                const its = editInv.editItems||editInv.invoice_items||[];
+                const sub = its.reduce((s,i)=>s+i.quantity*i.price,0);
+                const disc = editInv.discount_type==="pct"?sub*(editInv.discount_value||0)/100:(+editInv.discount_value||0);
+                const ship = editInv.shipment_type==="pct"?sub*(editInv.shipment_value||0)/100:(+editInv.shipment_value||0);
+                const tot = Math.max(0, sub - disc + ship);
+                const supplierAmt = +(editInv.partial_supplier||0);
+                const shipAmt2 = +(editInv.partial_ship||0);
+                const bsmAmt = +(editInv.partial_bsm||0);
+                const totalPaid = supplierAmt + shipAmt2 + bsmAmt;
+                const remaining = tot - totalPaid;
+                return (
+                  <div style={{ background:T.surface, borderRadius:12, padding:16, border:`1px solid ${T.yellow}44` }}>
+                    <div style={{ fontSize:12, color:T.yellow, fontWeight:700, marginBottom:14, textTransform:"uppercase" }}>🔶 Payment Breakdown</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12, marginBottom:14 }}>
+                      {/* Supplier */}
+                      <div style={{ background:T.card, borderRadius:10, padding:12 }}>
+                        <div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:8 }}>🏭 Supplier Payment</div>
+                        <input type="number" value={editInv.partial_supplier||""} onChange={e=>setEditInv({...editInv,partial_supplier:e.target.value})} placeholder="0.00" style={{ width:"100%", marginBottom:8 }} />
+                        <select value={editInv.partial_supplier_method||"cash_usd"} onChange={e=>setEditInv({...editInv,partial_supplier_method:e.target.value})} style={{ width:"100%", fontSize:12 }}>
+                          <option value="cash_usd">💵 Cash USD</option>
+                          <option value="wallet_usdt">💎 Wallet USDT</option>
+                          <option value="bank_transfer">🏦 Bank Transfer</option>
+                        </select>
+                      </div>
+                      {/* Shipment */}
+                      {ship > 0 && (
+                        <div style={{ background:T.card, borderRadius:10, padding:12 }}>
+                          <div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:8 }}>🚢 Shipment Payment <span style={{ color:T.muted, fontWeight:400 }}>({fmt(ship)} total)</span></div>
+                          <input type="number" value={editInv.partial_ship||""} onChange={e=>setEditInv({...editInv,partial_ship:e.target.value})} placeholder="0.00" style={{ width:"100%", marginBottom:8 }} />
+                          <select value={editInv.partial_ship_method||"cash_usd"} onChange={e=>setEditInv({...editInv,partial_ship_method:e.target.value})} style={{ width:"100%", fontSize:12 }}>
+                            <option value="cash_usd">💵 Cash USD</option>
+                            <option value="wallet_usdt">💎 Wallet USDT</option>
+                            <option value="bank_transfer">🏦 Bank Transfer</option>
+                          </select>
+                        </div>
+                      )}
+                      {/* BSM Profit */}
+                      <div style={{ background:T.card, borderRadius:10, padding:12 }}>
+                        <div style={{ fontSize:11, color:T.green, fontWeight:700, marginBottom:8 }}>🏦 BSM Profit Paid</div>
+                        <input type="number" value={editInv.partial_bsm||""} onChange={e=>setEditInv({...editInv,partial_bsm:e.target.value})} placeholder="0.00" style={{ width:"100%", marginBottom:8 }} />
+                        <select value={editInv.partial_bsm_method||"cash_usd"} onChange={e=>setEditInv({...editInv,partial_bsm_method:e.target.value})} style={{ width:"100%", fontSize:12 }}>
+                          <option value="cash_usd">💵 Cash USD</option>
+                          <option value="wallet_usdt">💎 Wallet USDT</option>
+                          <option value="bank_transfer">🏦 Bank Transfer</option>
+                        </select>
+                      </div>
+                    </div>
+                    {/* Summary */}
+                    <div style={{ borderTop:`1px solid ${T.border}`, paddingTop:12, fontFamily:T.mono, fontSize:13 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}><span style={{ color:T.muted }}>Invoice Total</span><span style={{ fontWeight:700 }}>{fmt(tot)}</span></div>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}><span style={{ color:T.green }}>Total Paid</span><span style={{ color:T.green, fontWeight:700 }}>{fmt(totalPaid)}</span></div>
+                      <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderTop:`1px solid ${T.border}`, marginTop:4 }}>
+                        <span style={{ color: remaining > 0 ? T.red : T.green, fontWeight:700 }}>Remaining</span>
+                        <span style={{ color: remaining > 0 ? T.red : T.green, fontWeight:800, fontSize:15 }}>{fmt(Math.abs(remaining))} {remaining > 0 ? "UNPAID" : "✅"}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* PAID - Payment Method */}
+              {editInv.payment_status === "paid" && (
                 <div style={{ marginTop:10 }}>
-                  <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Amount Paid ($)</div>
-                  <input type="number" value={editInv.amount_paid ?? ""} onChange={e => setEditInv({...editInv, amount_paid:e.target.value})} placeholder="0.00" style={{ maxWidth:200 }} min="0" max={editInv.total} />
-                  <div style={{ fontSize:12, color:T.yellow, marginTop:4, fontFamily:T.mono }}>Remaining: {fmt(Math.max(0, editInv.total - (+editInv.amount_paid || 0)))}</div>
+                  <div style={{ fontSize:11, color:T.muted, marginBottom:8, textTransform:"uppercase" }}>Payment Method</div>
+                  <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:10 }}>
+                    {[
+                      { val:"cash_usd", label:"💵 Cash USD", color:T.green },
+                      { val:"wallet_usdt", label:"💎 Wallet USDT", color:T.accent },
+                      { val:"bank_transfer", label:"🏦 Bank Transfer", color:T.yellow },
+                    ].map(opt => (
+                      <button key={opt.val} onClick={() => setEditInv({...editInv, payment_method:opt.val})} style={{ background:editInv.payment_method===opt.val?opt.color+"33":"transparent", color:editInv.payment_method===opt.val?opt.color:T.muted, border:`2px solid ${editInv.payment_method===opt.val?opt.color:T.border}`, borderRadius:10, padding:"8px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {(editInv.payment_method === "wallet_usdt" || editInv.payment_method === "bank_transfer") && (
+                    <div>
+                      <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Reference #</div>
+                      <input value={editInv.payment_reference || ""} onChange={e => setEditInv({...editInv, payment_reference:e.target.value})} placeholder="Tx ID / Bank Ref #" style={{ maxWidth:300 }} />
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-
-            {/* Payment Method */}
-            {editInv.payment_status !== "pending" && (
-              <div style={{ marginBottom:16 }}>
-                <div style={{ fontSize:11, color:T.muted, marginBottom:8, textTransform:"uppercase" }}>Payment Method</div>
-                <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:10 }}>
-                  {[
-                    { val:"cash_usd", label:"💵 Cash USD", color:T.green },
-                    { val:"wallet_usdt", label:"💎 Wallet USDT", color:T.accent },
-                    { val:"bank_transfer", label:"🏦 Bank Transfer", color:T.yellow },
-                  ].map(opt => (
-                    <button key={opt.val} onClick={() => setEditInv({...editInv, payment_method:opt.val})} style={{ background:editInv.payment_method===opt.val?opt.color+"33":"transparent", color:editInv.payment_method===opt.val?opt.color:T.muted, border:`2px solid ${editInv.payment_method===opt.val?opt.color:T.border}`, borderRadius:10, padding:"8px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                {(editInv.payment_method === "wallet_usdt" || editInv.payment_method === "bank_transfer") && (
-                  <div>
-                    <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Reference #</div>
-                    <input value={editInv.payment_reference || ""} onChange={e => setEditInv({...editInv, payment_reference:e.target.value})} placeholder="Tx ID / Bank Ref #" style={{ maxWidth:300 }} />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Summary */}
-            <div style={{ background:T.surface, borderRadius:8, padding:12, marginBottom:20, fontFamily:T.mono, fontSize:13 }}>
-              <div style={{ display:"flex", justifyContent:"space-between" }}>
-                <span style={{ color:T.muted }}>Invoice Total</span>
-                <span style={{ fontWeight:800, color:T.accent }}>{fmt(editInv.total)}</span>
-              </div>
             </div>
 
             <div style={{ display:"flex", gap:10 }}>
