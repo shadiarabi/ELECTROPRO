@@ -888,6 +888,35 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
           }));
         }
       }
+
+      // Auto-add shipment charge to shipping company's supplier balance
+      if (newInv.type === "buy" && shipmentAmt > 0 && newInv.shipmentCompany) {
+        // Find supplier by name
+        const { data: shipSupplier } = await supabase.from("suppliers").select("id").ilike("name", newInv.shipmentCompany).single();
+        if (shipSupplier) {
+          const paymentType = newInv.shipmentPaymentStatus === "paid" ? "payment" : "charge";
+          await supabase.from("supplier_payments").insert({
+            supplier_id: shipSupplier.id,
+            date: newInv.date,
+            amount: shipmentAmt,
+            type: "charge",
+            notes: `Shipment for invoice ${invId}`,
+            payment_method: newInv.shipmentPaymentStatus === "paid" ? newInv.shipmentPaymentMethod : null,
+          });
+          // If shipment is already paid, also record the payment
+          if (newInv.shipmentPaymentStatus === "paid") {
+            await supabase.from("supplier_payments").insert({
+              supplier_id: shipSupplier.id,
+              date: newInv.date,
+              amount: shipmentAmt,
+              type: "payment",
+              notes: `Shipment payment for invoice ${invId}`,
+              payment_method: newInv.shipmentPaymentMethod,
+            });
+          }
+        }
+      }
+
       setShowCreate(false);
       setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, shipmentCompany: "", shipmentPaymentStatus: "pending", shipmentPaymentMethod: "cash_usd", paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
       onRefresh();
