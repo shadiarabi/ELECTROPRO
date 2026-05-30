@@ -54,15 +54,42 @@ const Badge = ({ children, color = T.accent }) => (
   <span style={{ background: color + "22", color, border: `1px solid ${color}44`, borderRadius: 4, padding: "2px 8px", fontSize: 11, fontFamily: T.mono, letterSpacing: 1 }}>{children}</span>
 );
 
-const StatCard = ({ label, value, sub, color = T.accent, icon }) => (
-  <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden" }}>
+const StatCard = ({ label, value, sub, color = T.accent, icon, onClick }) => (
+  <div onClick={onClick} style={{ background: T.card, border: `1px solid ${onClick ? color+"66" : T.border}`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "transform .15s, box-shadow .15s" }}
+    onMouseEnter={e => { if (onClick) { e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow=`0 8px 24px ${color}33`; }}}
+    onMouseLeave={e => { if (onClick) { e.currentTarget.style.transform=""; e.currentTarget.style.boxShadow=""; }}}>
     <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${color}, transparent)` }} />
     <div style={{ fontSize: 22, marginBottom: 8 }}>{icon}</div>
     <div style={{ fontSize: 26, fontWeight: 800, color, letterSpacing: -1 }}>{value}</div>
     <div style={{ fontSize: 12, color: T.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
     {sub && <div style={{ fontSize: 11, color: T.muted, marginTop: 6, fontFamily: T.mono }}>{sub}</div>}
+    {onClick && <div style={{ position: "absolute", bottom: 8, right: 12, fontSize: 10, color: color, opacity: 0.6 }}>tap to view →</div>}
   </div>
 );
+
+// ─── DATE FILTER ─────────────────────────────────────────────────────────────
+const DateFilter = ({ value, onChange }) => (
+  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 14px", marginBottom: 20 }}>
+    <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1, marginRight: 4 }}>📅 Filter:</span>
+    {[["all","All Time"],["today","Today"],["this_week","This Week"],["this_month","This Month"],["last_month","Last Month"],["this_year","This Year"]].map(([v,l]) => (
+      <button key={v} onClick={() => onChange(v)} style={{ background: value===v ? T.accent : "transparent", color: value===v ? "#000" : T.muted, border: `1px solid ${value===v ? T.accent : T.border}`, borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: value===v ? 700 : 400, cursor: "pointer" }}>{l}</button>
+    ))}
+  </div>
+);
+
+const filterByDate = (items, period, dateKey = "date") => {
+  if (period === "all") return items;
+  const now = new Date();
+  return items.filter(i => {
+    const d = new Date(i[dateKey]);
+    if (period === "today") return d.toDateString() === now.toDateString();
+    if (period === "this_week") { const w = new Date(now); w.setDate(now.getDate()-7); return d >= w; }
+    if (period === "this_month") return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();
+    if (period === "last_month") { const lm=new Date(now.getFullYear(),now.getMonth()-1); return d.getMonth()===lm.getMonth()&&d.getFullYear()===lm.getFullYear(); }
+    if (period === "this_year") return d.getFullYear()===now.getFullYear();
+    return true;
+  });
+};
 
 const Btn = ({ children, onClick, color = T.accent, outline, small, disabled, loading }) => (
   <button onClick={onClick} disabled={disabled || loading} style={{
@@ -228,34 +255,74 @@ function UsersPage({ currentUser }) {
 function PrintInvoice({ inv, locations, onClose }) {
   const loc = locations.find(l => l.id === inv.location_id);
   const total = inv.total || 0;
+  const subtotal = (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0);
+  const discountAmt = inv.discount_value > 0 ? (inv.discount_type === "pct" ? subtotal * inv.discount_value / 100 : inv.discount_value) : 0;
+  const shipAmt = inv.shipment_value > 0 ? (inv.shipment_type === "pct" ? subtotal * inv.shipment_value / 100 : inv.shipment_value) : 0;
+  const pmLabel = { cash_usd: "💵 Cash USD", wallet_usdt: "💎 Wallet USDT", bank_transfer: "🏦 Bank Transfer" };
 
   const print = () => {
-    const printWindow = window.open('', '_blank', 'width=700,height=900');
-    const content = document.getElementById('invoice-print-content').innerHTML;
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Invoice ${inv.id}</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 40px; color: #000; background: #fff; }
-          table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-          th { text-align: left; padding: 8px 12px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #666; border-bottom: 1px solid #ddd; }
-          td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
-          .total-row { font-weight: 800; font-size: 16px; border-top: 2px solid #000; }
-          @media print { body { padding: 20px; } }
-        </style>
-      </head>
-      <body>${content}</body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
+    const html = `<!DOCTYPE html><html><head><title>Invoice ${inv.id}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; }
+      h1 { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+      .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 16px; margin-bottom: 16px; }
+      .right { text-align: right; }
+      .title { font-size: 18px; font-weight: 800; }
+      .sub { font-size: 13px; color: #666; margin-top: 4px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+      th { text-align: left; padding: 8px 0; font-size: 12px; border-bottom: 2px solid #000; }
+      th:not(:first-child) { text-align: right; }
+      td { padding: 10px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      td:not(:first-child) { text-align: right; }
+      .totals { display: flex; justify-content: flex-end; }
+      .totals-box { width: 240px; border-top: 2px solid #000; padding-top: 12px; }
+      .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+      .row.total { font-size: 16px; font-weight: 800; border-top: 2px solid #000; margin-top: 8px; padding-top: 8px; }
+      .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; text-align: center; font-size: 11px; color: #999; }
+      .strike { text-decoration: line-through; color: #999; font-size: 11px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="header">
+        <div><div class="title">${inv.type === "sell" ? "SALES INVOICE" : "PURCHASE INVOICE"}</div><div class="sub">#${inv.id}</div></div>
+        <div class="right">
+          <div style="font-size:13px">Date: <strong>${inv.date}</strong></div>
+          <div style="font-size:13px">Location: <strong>${loc?.name || ""}</strong></div>
+          <div style="font-size:13px">${inv.type === "sell" ? "Customer" : "Supplier"}: <strong>${inv.customer}</strong></div>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Product</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Disc</th><th style="text-align:right">Total</th></tr></thead>
+        <tbody>
+          ${(inv.invoice_items || []).map(item => `<tr>
+            <td>${item.product_name}</td>
+            <td style="text-align:right">${item.quantity}</td>
+            <td style="text-align:right">${item.discount_pct > 0 ? `<span class="strike">$${Number(item.original_price||item.price).toFixed(2)}</span><br>` : ""}$${Number(item.price).toFixed(2)}</td>
+            <td style="text-align:right;color:red">${item.discount_pct > 0 ? item.discount_pct + "%" : "—"}</td>
+            <td style="text-align:right;font-weight:700">$${Number(item.quantity * item.price).toFixed(2)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+      <div class="totals"><div class="totals-box">
+        <div class="row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
+        ${discountAmt > 0 ? `<div class="row" style="color:red"><span>Discount${inv.discount_type==="pct"?` (${inv.discount_value}%)`:""}</span><span>−$${discountAmt.toFixed(2)}</span></div>` : ""}
+        ${shipAmt > 0 ? `<div class="row" style="color:#0066cc"><span>Shipment${inv.shipment_type==="pct"?` (${inv.shipment_value}%)`:""}</span><span>+$${shipAmt.toFixed(2)}</span></div>` : ""}
+        <div class="row total"><span>TOTAL</span><span>$${Number(total).toFixed(2)}</span></div>
+        ${inv.payment_method ? `<div class="row"><span>Supplier Payment</span><span>${{cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[inv.payment_method]||""}</span></div>` : ""}
+        ${inv.payment_reference ? `<div class="row"><span>Reference</span><span>${inv.payment_reference}</span></div>` : ""}
+        ${inv.shipment_company ? `<div class="row"><span>Shipping Co.</span><span>${inv.shipment_company}</span></div>` : ""}
+        ${inv.shipment_payment_status ? `<div class="row"><span>Shipment Payment</span><span>${inv.shipment_payment_status === "paid" ? ({cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[inv.shipment_payment_method]||"Paid") : "⏳ Pending"}</span></div>` : ""}
+      </div></div>
+      <div class="footer">Thank you for your business! • ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=700,height=900");
+    w.document.write(html);
+    w.document.close();
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} className="no-print">
       <div style={{ background: "white", color: "#000", borderRadius: 12, padding: 40, width: "100%", maxWidth: 600, maxHeight: "90vh", overflow: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h2 style={{ fontSize: 22, fontWeight: 800 }}>⚡ ElectroPro</h2>
@@ -264,8 +331,7 @@ function PrintInvoice({ inv, locations, onClose }) {
             <Btn small outline onClick={onClose} color="#666">Close</Btn>
           </div>
         </div>
-        <div id="invoice-print-content">
-          <div style={{ borderBottom: "2px solid #000", paddingBottom: 16, marginBottom: 16 }}>
+        <div style={{ borderBottom: "2px solid #000", paddingBottom: 16, marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: 18, fontWeight: 800 }}>{inv.type === "sell" ? "SALES INVOICE" : "PURCHASE INVOICE"}</div>
@@ -277,74 +343,77 @@ function PrintInvoice({ inv, locations, onClose }) {
               <div style={{ fontSize: 13 }}>{inv.type === "sell" ? "Customer" : "Supplier"}: <strong>{inv.customer}</strong></div>
             </div>
           </div>
-          </div>
-          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 24 }}>
-            <thead>
-              <tr style={{ borderBottom: "2px solid #000" }}>
-                <th style={{ textAlign: "left", padding: "8px 0", fontSize: 12 }}>Product</th>
-                <th style={{ textAlign: "center", padding: "8px 0", fontSize: 12 }}>Qty</th>
-                <th style={{ textAlign: "right", padding: "8px 0", fontSize: 12 }}>Price</th>
-                <th style={{ textAlign: "right", padding: "8px 0", fontSize: 12 }}>Disc</th>
-                <th style={{ textAlign: "right", padding: "8px 0", fontSize: 12 }}>Total</th>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 24 }}>
+          <thead>
+            <tr style={{ borderBottom: "2px solid #000" }}>
+              <th style={{ textAlign: "left", padding: "8px 0", fontSize: 12 }}>Product</th>
+              <th style={{ textAlign: "center", padding: "8px 0", fontSize: 12 }}>Qty</th>
+              <th style={{ textAlign: "right", padding: "8px 0", fontSize: 12 }}>Price</th>
+              <th style={{ textAlign: "right", padding: "8px 0", fontSize: 12 }}>Disc</th>
+              <th style={{ textAlign: "right", padding: "8px 0", fontSize: 12 }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(inv.invoice_items || []).map((item, i) => (
+              <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
+                <td style={{ padding: "10px 0", fontSize: 13 }}>{item.product_name}</td>
+                <td style={{ textAlign: "center", padding: "10px 0", fontSize: 13 }}>{item.quantity}</td>
+                <td style={{ textAlign: "right", padding: "10px 0", fontSize: 13 }}>
+                  {item.discount_pct > 0 ? <><span style={{ textDecoration: "line-through", color: "#999", fontSize: 11 }}>{fmt(item.original_price || item.price)}</span><br/>{fmt(item.price)}</> : fmt(item.price)}
+                </td>
+                <td style={{ textAlign: "right", padding: "10px 0", fontSize: 12, color: "red" }}>{item.discount_pct > 0 ? `${item.discount_pct}%` : "—"}</td>
+                <td style={{ textAlign: "right", padding: "10px 0", fontSize: 13, fontWeight: 700 }}>{fmt(item.quantity * item.price)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {(inv.invoice_items || []).map((item, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
-                  <td style={{ padding: "10px 0", fontSize: 13 }}>{item.product_name}</td>
-                  <td style={{ textAlign: "center", padding: "10px 0", fontSize: 13 }}>{item.quantity}</td>
-                  <td style={{ textAlign: "right", padding: "10px 0", fontSize: 13 }}>
-                    {item.discount_pct > 0 ? <><span style={{ textDecoration: "line-through", color: "#999", fontSize: 11 }}>{fmt(item.original_price || item.price)}</span><br/>{fmt(item.price)}</> : fmt(item.price)}
-                  </td>
-                  <td style={{ textAlign: "right", padding: "10px 0", fontSize: 12, color: "red" }}>{item.discount_pct > 0 ? `${item.discount_pct}%` : "—"}</td>
-                  <td style={{ textAlign: "right", padding: "10px 0", fontSize: 13, fontWeight: 700 }}>{fmt(item.quantity * item.price)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div style={{ borderTop: "2px solid #000", paddingTop: 16 }}>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <div style={{ width: 220 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13 }}>
-                  <span>Subtotal</span><span>{fmt((inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0))}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#444" }}>
-                  <span>Total Qty</span><span style={{ fontWeight: 700 }}>{(inv.invoice_items || []).reduce((s, i) => s + i.quantity, 0)} units</span>
-                </div>
-                {inv.discount_value > 0 && (
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "red" }}>
-                    <span>Discount {inv.discount_type === "pct" ? `(${inv.discount_value}%)` : ""}</span>
-                    <span>− {fmt(inv.discount_type === "pct" ? (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0) * inv.discount_value / 100 : inv.discount_value)}</span>
-                  </div>
-                )}
-                {inv.shipment_value > 0 && (
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#0066cc" }}>
-                    <span>🚢 Shipment {inv.shipment_type === "pct" ? `(${inv.shipment_value}%)` : ""}</span>
-                    <span>+ {fmt(inv.shipment_type === "pct" ? (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.price, 0) * inv.shipment_value / 100 : inv.shipment_value)}</span>
-                  </div>
-                )}
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 16, fontWeight: 800, borderTop: "2px solid #000", marginTop: 8 }}>
-                  <span>TOTAL</span><span>{fmt(total)}</span>
-                </div>
-                {inv.payment_method && (
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, marginTop: 4, color: "#333" }}>
-                    <span>Payment Method</span>
-                    <span style={{ fontWeight: 700 }}>
-                      {inv.payment_method === "cash_usd" ? "Cash USD" : inv.payment_method === "wallet_usdt" ? "Wallet USDT" : "Bank Transfer"}
-                    </span>
-                  </div>
-                )}
-                {inv.payment_reference && (
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, color: "#666" }}>
-                    <span>Reference</span><span>{inv.payment_reference}</span>
-                  </div>
-                )}
+            ))}
+          </tbody>
+        </table>
+        <div style={{ borderTop: "2px solid #000", paddingTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <div style={{ width: 220 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13 }}>
+                <span>Subtotal</span><span>{fmt(subtotal)}</span>
               </div>
+              {discountAmt > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "red" }}>
+                  <span>Discount {inv.discount_type === "pct" ? `(${inv.discount_value}%)` : ""}</span>
+                  <span>− {fmt(discountAmt)}</span>
+                </div>
+              )}
+              {shipAmt > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, color: "#0066cc" }}>
+                  <span>🚢 Shipment {inv.shipment_type === "pct" ? `(${inv.shipment_value}%)` : ""}</span>
+                  <span>+ {fmt(shipAmt)}</span>
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 16, fontWeight: 800, borderTop: "2px solid #000", marginTop: 8 }}>
+                <span>TOTAL</span><span>{fmt(total)}</span>
+              </div>
+              {inv.payment_method && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, marginTop: 4, color: "#333" }}>
+                  <span>{inv.type === "buy" ? "Supplier Payment" : "Payment"}</span><span style={{ fontWeight: 700 }}>{pmLabel[inv.payment_method] || ""}</span>
+                </div>
+              )}
+              {inv.payment_reference && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, color: "#666" }}>
+                  <span>Reference</span><span style={{ fontFamily: "monospace" }}>{inv.payment_reference}</span>
+                </div>
+              )}
+              {inv.shipment_company && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13, color: "#333" }}>
+                  <span>🚢 Shipping Co.</span><span style={{ fontWeight: 700 }}>{inv.shipment_company}</span>
+                </div>
+              )}
+              {inv.shipment_payment_status && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13, color: inv.shipment_payment_status === "paid" ? "#007700" : "#cc4400" }}>
+                  <span>Shipment Payment</span><span style={{ fontWeight: 700 }}>{inv.shipment_payment_status === "paid" ? (pmLabel[inv.shipment_payment_method] || "Paid") : "⏳ Pending"}</span>
+                </div>
+              )}
             </div>
           </div>
-          <div style={{ marginTop: 40, borderTop: "1px solid #ddd", paddingTop: 16, fontSize: 11, color: "#999", textAlign: "center" }}>
-            Thank you for your business! • ElectroPro Business Manager
-          </div>
+        </div>
+        <div style={{ marginTop: 40, paddingTop: 16, borderTop: "1px solid #eee", textAlign: "center", fontSize: 11, color: "#999" }}>
+          Thank you for your business! • ElectroPro Business Manager
         </div>
       </div>
     </div>
@@ -352,29 +421,16 @@ function PrintInvoice({ inv, locations, onClose }) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ invoices, products, locations, userProfile }) {
-  // Use payment_status as primary, fall back to status
-  const getStatus = i => i.payment_status || i.status || "pending";
-  const sells = invoices.filter(i => i.type === "sell");
-  const buys = invoices.filter(i => i.type === "buy");
-  const paidSells = sells.filter(i => getStatus(i) === "paid");
-  const pendingSells = sells.filter(i => getStatus(i) !== "paid");
-  const paidBuys = buys.filter(i => getStatus(i) === "paid");
-  const pendingBuys = buys.filter(i => getStatus(i) !== "paid");
-
-  const revenue = paidSells.reduce((s, i) => s + i.total, 0);
-  const revenuePending = pendingSells.reduce((s, i) => s + i.total, 0);
-  const revenueCollected = pendingSells.reduce((s, i) => s + (i.amount_paid || 0), 0);
-  const revenueStillDue = revenuePending - revenueCollected;
-  const cogs = paidSells.reduce((s, i) => s + i.cogs, 0);
-  const cogsPending = pendingSells.reduce((s, i) => s + i.cogs, 0);
+function Dashboard({ invoices, products, locations, userProfile, setPage }) {
+  const sells = invoices.filter(i => i.type === "sell" && i.status === "paid");
+  const sellsPending = invoices.filter(i => i.type === "sell" && i.status !== "paid");
+  const buys = invoices.filter(i => i.type === "buy" && i.status === "paid");
+  const revenue = sells.reduce((s, i) => s + i.total, 0);
+  const pendingRevenue = sellsPending.reduce((s, i) => s + i.total, 0);
+  const cogs = sells.reduce((s, i) => s + i.cogs, 0);
   const profit = revenue - cogs;
-  const expectedRevenue = sells.reduce((s, i) => s + i.total, 0);
-  const expectedCogs = sells.reduce((s, i) => s + i.cogs, 0);
-  const expectedProfit = expectedRevenue - expectedCogs;
-  const purchasesPaid = paidBuys.reduce((s, i) => s + i.total, 0);
-  const purchasesPending = pendingBuys.reduce((s, i) => s + i.total - (i.amount_paid || 0), 0);
   const totalItems = products.reduce((s, p) => s + (p.totalStock || 0), 0);
+  const maxRev = Math.max(...locations.map(l => l.revenue || 0), 1);
   const canSeeFinancials = ["admin", "manager"].includes(userProfile?.role);
 
   return (
@@ -385,73 +441,41 @@ function Dashboard({ invoices, products, locations, userProfile }) {
         <span style={{ marginLeft: 8 }}><Badge color={userProfile?.role === "admin" ? T.red : userProfile?.role === "manager" ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></span>
       </p>
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${paidSells.length} paid sales`} />}
-        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${pendingSells.length} pending sales`} />}
-        {canSeeFinancials && <StatCard label="Net Profit (Paid)" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} />}
-        {canSeeFinancials && <StatCard label="Expected Profit" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit >= 0 ? T.accent : T.red} sub="All invoices incl. pending" />}
-        <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} />
+        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} onClick={() => setPage("invoices")} />}
+        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending`} onClick={() => setPage("invoices")} />}
+        {canSeeFinancials && <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} onClick={() => setPage("pl")} />}
+        {canSeeFinancials && <StatCard label="Purchases" value={fmt(buys.reduce((s, i) => s + i.total, 0))} icon="🛒" color={T.accent} sub={`${buys.length} invoices`} onClick={() => setPage("invoices")} />}
+        <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} onClick={() => setPage("inventory")} />
       </div>
-
-      {canSeeFinancials && revenueStillDue > 0 && (
-        <div style={{ background: T.yellow+"11", border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: T.yellow }}>⏳ Pending Collections from Clients</div>
-            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{pendingSells.length} unpaid/partial sales — collected {fmt(revenueCollected)} so far</div>
-          </div>
-          <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: T.yellow }}>{fmt(revenueStillDue)} still due</div>
+      {canSeeFinancials && pendingRevenue > 0 && (
+        <div style={{ background: T.yellow+"11", border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 13, color: T.yellow }}>⏳ You have <strong>{sellsPending.length} unpaid invoice{sellsPending.length > 1 ? "s" : ""}</strong> worth <strong>{fmt(pendingRevenue)}</strong> pending collection.</span>
         </div>
       )}
-
-      {canSeeFinancials && purchasesPending > 0 && (
-        <div style={{ background: T.red+"11", border: `1px solid ${T.red}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: T.red }}>🔴 Pending Payments to Suppliers</div>
-            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{pendingBuys.length} unpaid purchase invoices</div>
-          </div>
-          <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: T.red }}>{fmt(purchasesPending)}</div>
-        </div>
-      )}
-
       {canSeeFinancials && (
         <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 24 }}>
             <h3 style={{ fontSize: 13, letterSpacing: 2, textTransform: "uppercase", color: T.muted, marginBottom: 20 }}>Revenue by Location</h3>
-            {locations.filter(l => l.revenueTotal > 0).map(l => (
+            {locations.map(l => (
               <div key={l.id} style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 13 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
                   <span>{l.name}</span>
-                  <div style={{ display:"flex", gap:10 }}>
-                    {l.revenue > 0 && <span style={{ fontFamily: T.mono, color: T.green, fontSize:12 }}>✅ {fmt(l.revenue)}</span>}
-                    {l.revenuePending > 0 && <span style={{ fontFamily: T.mono, color: T.yellow, fontSize:12 }}>⏳ {fmt(l.revenuePending)}</span>}
-                  </div>
+                  <span style={{ fontFamily: T.mono, color: T.accent }}>{fmt(l.revenue || 0)}</span>
                 </div>
-                <div style={{ background: T.border, borderRadius: 4, height: 8, display:"flex", overflow:"hidden" }}>
-                  <div style={{ width: `${(l.revenue / Math.max(...locations.map(x=>x.revenueTotal||0),1)) * 100}%`, height: "100%", background: T.green }} />
-                  <div style={{ width: `${(l.revenuePending / Math.max(...locations.map(x=>x.revenueTotal||0),1)) * 100}%`, height: "100%", background: T.yellow }} />
+                <div style={{ background: T.border, borderRadius: 4, height: 6 }}>
+                  <div style={{ width: `${((l.revenue || 0) / maxRev) * 100}%`, height: "100%", background: `linear-gradient(90deg,${T.accent},${T.green})`, borderRadius: 4 }} />
                 </div>
               </div>
             ))}
-            {locations.every(l => !l.revenueTotal) && (
-              <div style={{ color:T.muted, fontSize:13, textAlign:"center", padding:20 }}>No sales recorded yet</div>
-            )}
-            <div style={{ display:"flex", gap:16, marginTop:12, fontSize:11 }}>
-              <span style={{ color:T.green }}>■ Paid</span>
-              <span style={{ color:T.yellow }}>■ Pending</span>
-            </div>
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 24 }}>
             <h3 style={{ fontSize: 13, letterSpacing: 2, textTransform: "uppercase", color: T.muted, marginBottom: 20 }}>P&L Summary</h3>
             {[
               { label: "Paid Revenue", val: revenue, color: T.green },
-              { label: "Pending Revenue (Total)", val: revenuePending, color: T.yellow },
-              { label: "Already Collected (Partial)", val: revenueCollected, color: T.green },
-              { label: "Still Due from Clients", val: revenueStillDue, color: T.yellow },
-              { label: "Expected Total Revenue", val: expectedRevenue, color: T.accent, bold: true },
-              { label: "Cost of Goods (Paid Sales)", val: -cogs, color: T.red },
-              { label: "Cost of Goods (Pending Sales)", val: -cogsPending, color: T.red },
-              { label: "Net Profit (Paid Only)", val: profit, color: profit >= 0 ? T.green : T.red, bold: true },
-              { label: "Expected Profit (All)", val: expectedProfit, color: expectedProfit >= 0 ? T.accent : T.red, bold: true },
-              { label: "Still Owed to Suppliers", val: -purchasesPending, color: T.red },
+              { label: "Pending Revenue", val: pendingRevenue, color: T.yellow },
+              { label: "Cost of Goods Sold", val: -cogs, color: T.red },
+              { label: "Gross Profit", val: revenue - cogs, color: T.accent, bold: true },
+              { label: "Net Profit / Loss", val: profit, color: profit >= 0 ? T.green : T.red, bold: true },
             ].map((row, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${T.border}` }}>
                 <span style={{ fontSize: 13, color: row.bold ? T.text : T.muted, fontWeight: row.bold ? 700 : 400 }}>{row.label}</span>
@@ -482,11 +506,103 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
   const [editProduct, setEditProduct] = useState(null);
-  const [adjustStock, setAdjustStock] = useState(null); // { product, location_id, currentQty }
+  const [adjustStock, setAdjustStock] = useState(null);
   const [adjustForm, setAdjustForm] = useState({ newQty: "", reason: "correction", notes: "" });
   const [form, setForm] = useState({ name: "", sku: "", category: "", cost_price: "", sell_price: "" });
   const canEdit = ["admin", "manager"].includes(userProfile?.role);
+
+  const resyncStock = async () => {
+    if (!window.confirm("Recalculate all stock from invoices and transfers?")) return;
+    setSyncing(true);
+    setSyncMsg("Loading data...");
+
+    // Fetch everything in parallel
+    const [invRes, itemRes, transferRes, stockRes] = await Promise.all([
+      supabase.from("invoices").select("id, type, location_id"),
+      supabase.from("invoice_items").select("invoice_id, product_id, quantity"),
+      supabase.from("stock_transfers").select("product_id, from_location_id, to_location_id, quantity"),
+      supabase.from("stock").select("id, product_id, location_id"),
+    ]);
+
+    setSyncMsg("Calculating...");
+    const invoices = invRes.data || [];
+    const items = itemRes.data || [];
+    const transfers = transferRes.data || [];
+    const stockRows = stockRes.data || [];
+
+    // Build invoice lookup map
+    const invMap = {};
+    for (const inv of invoices) invMap[inv.id] = inv;
+
+    // Calculate stock per product+location
+    const stockMap = {};
+    const key = (pid, lid) => `${pid}_${lid}`;
+
+    for (const item of items) {
+      const inv = invMap[item.invoice_id];
+      if (!inv) continue;
+      const k = key(item.product_id, inv.location_id);
+      if (!stockMap[k]) stockMap[k] = 0;
+      if (inv.type === "buy") stockMap[k] += +item.quantity;
+      if (inv.type === "sell") stockMap[k] -= +item.quantity;
+    }
+
+    for (const t of transfers) {
+      const fk = key(t.product_id, t.from_location_id);
+      const tk = key(t.product_id, t.to_location_id);
+      if (!stockMap[fk]) stockMap[fk] = 0;
+      if (!stockMap[tk]) stockMap[tk] = 0;
+      stockMap[fk] -= +t.quantity;
+      stockMap[tk] += +t.quantity;
+    }
+
+    setSyncMsg("Updating stock...");
+    // Update existing stock rows in batches
+    const updates = stockRows.map(row => {
+      const k = key(row.product_id, row.location_id);
+      const qty = Math.max(0, stockMap[k] || 0);
+      return supabase.from("stock").update({ quantity: qty }).eq("id", row.id);
+    });
+
+    // Run in batches of 20
+    for (let i = 0; i < updates.length; i += 20) {
+      await Promise.all(updates.slice(i, i + 20));
+    }
+
+    // Recalculate weighted average cost for all products from purchase invoices
+    setSyncMsg("Recalculating costs...");
+    const { data: allProds } = await supabase.from("products").select("id");
+    for (const prod of (allProds || [])) {
+      const { data: invItems } = await supabase.from("invoice_items").select("quantity, price, invoice_id").eq("product_id", prod.id);
+      const { data: invs } = await supabase.from("invoices").select("id, shipment_value, shipment_type, type").eq("type", "buy");
+      const invMap = {};
+      (invs || []).forEach(inv => { invMap[inv.id] = inv; });
+      let totalQty = 0, totalCost = 0;
+      (invItems || []).forEach(ii => {
+        const inv = invMap[ii.invoice_id];
+        if (!inv) return;
+        const invSubtotal = (invItems || []).filter(x => x.invoice_id === ii.invoice_id).reduce((s, x) => s + x.quantity * x.price, 0);
+        const invShipAmt = inv.shipment_type === "pct" ? invSubtotal * (inv.shipment_value || 0) / 100 : (inv.shipment_value || 0);
+        const itemValue = ii.quantity * ii.price;
+        const shipShare = invSubtotal > 0 ? invShipAmt * (itemValue / invSubtotal) : 0;
+        const costPerUnit = ii.price + (ii.quantity > 0 ? shipShare / ii.quantity : 0);
+        totalQty += +ii.quantity;
+        totalCost += costPerUnit * +ii.quantity;
+      });
+      if (totalQty > 0) {
+        const avgCost = totalCost / totalQty;
+        await supabase.from("products").update({ cost_price: +avgCost.toFixed(4) }).eq("id", prod.id);
+      }
+    }
+
+    setSyncMsg("");
+    setSyncing(false);
+    onRefresh();
+    alert("✅ Stock and costs re-synced successfully!");
+  };
 
   const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase())
@@ -512,29 +628,10 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
   const saveEdit = async () => {
     if (!editProduct) return;
     setSaving(true);
-    const oldProduct = products.find(p => p.id === editProduct.id);
-    const nameChanged = oldProduct && oldProduct.name !== editProduct.name;
-    const costChanged = oldProduct && +oldProduct.cost_price !== +editProduct.cost_price;
-    const sellChanged = oldProduct && +oldProduct.sell_price !== +editProduct.sell_price;
-
-    // Update product
     await supabase.from("products").update({
       name: editProduct.name, sku: editProduct.sku, category: editProduct.category,
       cost_price: +editProduct.cost_price, sell_price: +editProduct.sell_price
     }).eq("id", editProduct.id);
-
-    // Sync name everywhere
-    if (nameChanged) {
-      await supabase.from("invoice_items").update({ product_name: editProduct.name }).eq("product_id", editProduct.id);
-      await supabase.from("stock_transfers").update({ product_name: editProduct.name }).eq("product_id", editProduct.id);
-      await supabase.from("sales_order_items").update({ product_name: editProduct.name }).eq("product_id", editProduct.id);
-    }
-
-    // Sync cost price to invoice_items (so profit is always accurate)
-    if (costChanged) {
-      await supabase.from("invoice_items").update({ cost: +editProduct.cost_price }).eq("product_id", editProduct.id);
-    }
-
     setEditProduct(null);
     onRefresh();
     setSaving(false);
@@ -567,7 +664,14 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
           <h2 style={{ fontSize: 28, fontWeight: 800 }}>Inventory</h2>
           <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{products.length} products · {locations.length} locations</p>
         </div>
-        {canEdit && <Btn onClick={() => setShowAdd(!showAdd)}>+ Add Product</Btn>}
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {canEdit && (
+            <button onClick={resyncStock} disabled={syncing} style={{ background: T.yellow+"22", border: `1px solid ${T.yellow}44`, borderRadius: 8, padding: "8px 16px", color: T.yellow, fontSize: 12, fontWeight: 700, cursor: syncing ? "not-allowed" : "pointer" }}>
+              {syncing ? `🔄 ${syncMsg}` : "🔄 Re-Sync Stock"}
+            </button>
+          )}
+          {canEdit && <Btn onClick={() => setShowAdd(!showAdd)}>+ Add Product</Btn>}
+        </div>
       </div>
 
       {/* Stock Adjustment Modal */}
@@ -666,12 +770,10 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
           <table>
             <thead>
               <tr>
-                {canEdit && <th>Act</th>}
-                <th>Product</th>
-                <th>SKU</th><th className="hide-mobile">Category</th>
+                <th>Product</th><th>SKU</th><th className="hide-mobile">Category</th>
                 <th className="hide-mobile">Cost</th><th>Sell</th><th className="hide-mobile">Margin</th>
                 {locations.map(l => <th key={l.id} className="hide-mobile">{l.name.split(" ")[0]}</th>)}
-                <th>Total</th>
+                <th>Total</th>{canEdit && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -679,12 +781,6 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
                 const margin = p.sell_price > 0 ? ((p.sell_price - p.cost_price) / p.sell_price * 100).toFixed(1) : 0;
                 return (
                   <tr key={p.id}>
-                    {canEdit && <td>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        <button onClick={() => setEditProduct(p)} style={{ background: T.accent + "22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                        <button onClick={() => deleteProduct(p.id)} style={{ background: T.red + "22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
-                      </div>
-                    </td>}
                     <td style={{ fontWeight: 600 }}>{p.name}</td>
                     <td style={{ fontFamily: T.mono, fontSize: 12, color: T.muted }}>{p.sku}</td>
                     <td className="hide-mobile"><Badge>{p.category}</Badge></td>
@@ -702,6 +798,12 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
                       );
                     })}
                     <td style={{ fontWeight: 700, fontFamily: T.mono, color: T.accent }}>{p.totalStock || 0}</td>
+                    {canEdit && <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setEditProduct(p)} style={{ background: T.accent + "22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                        <button onClick={() => deleteProduct(p.id)} style={{ background: T.red + "22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                      </div>
+                    </td>}
                   </tr>
                 );
               })}
@@ -716,14 +818,16 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
 // ─── INVOICES ─────────────────────────────────────────────────────────────────
 function Invoices({ invoices, setInvoices, products, locations, clients, suppliers, onRefresh, userProfile }) {
   const [typeFilter, setTypeFilter] = useState("all");
+  const [datePeriod, setDatePeriod] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [printInv, setPrintInv] = useState(null);
   const [editInv, setEditInv] = useState(null);
-  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
+  const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, shipmentCompany: "", shipmentPaymentStatus: "pending", shipmentPaymentMethod: "cash_usd", paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
-  const filtered = invoices.filter(i => typeFilter === "all" || i.type === typeFilter)
+  const filtered = filterByDate(invoices, datePeriod)
+    .filter(i => typeFilter === "all" || i.type === typeFilter)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const addItem = () => {
@@ -751,7 +855,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
     // Both sales and purchases use selected payment status
     const status = newInv.paymentStatus;
     const amountPaid = newInv.paymentStatus === "paid" ? grandTotal : newInv.paymentStatus === "partial" ? (+newInv.amountPaid || 0) : 0;
-    const { error: invErr } = await supabase.from("invoices").insert({
+    // Build invoice data — only include columns that exist in DB
+    const invoiceData = {
       id: invId, type: newInv.type, date: newInv.date,
       location_id: +newInv.location_id, customer: newInv.customer, status,
       payment_status: status, amount_paid: amountPaid,
@@ -761,29 +866,136 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       shipment_type: newInv.shipmentType, shipment_value: +newInv.shipmentValue || 0,
       client_id: newInv.client_id ? +newInv.client_id : null,
       supplier_id: newInv.supplier_id ? +newInv.supplier_id : null,
-    });
-    if (!invErr) {
+    };
+    // Try to add optional columns — if they fail, we still save the invoice
+    try { invoiceData.shipment_company = newInv.shipmentCompany || null; } catch(e) {}
+    try { invoiceData.shipment_payment_status = newInv.type === "buy" && shipmentAmt > 0 ? newInv.shipmentPaymentStatus : null; } catch(e) {}
+    try { invoiceData.shipment_payment_method = newInv.type === "buy" && shipmentAmt > 0 && newInv.shipmentPaymentStatus !== "pending" ? newInv.shipmentPaymentMethod : null; } catch(e) {}
+
+    const { error: invErr } = await supabase.from("invoices").insert(invoiceData);
+    if (invErr) {
+      // If failed due to missing columns, retry without optional fields
+      const basicData = { id: invId, type: newInv.type, date: newInv.date, location_id: +newInv.location_id, customer: newInv.customer, status, payment_status: status, amount_paid: amountPaid, payment_method: newInv.paymentStatus === "pending" ? null : newInv.paymentMethod, payment_reference: newInv.paymentReference || null, discount_type: newInv.discountType, discount_value: +newInv.discountValue || 0, shipment_type: newInv.shipmentType, shipment_value: +newInv.shipmentValue || 0, client_id: newInv.client_id ? +newInv.client_id : null, supplier_id: newInv.supplier_id ? +newInv.supplier_id : null };
+      const { error: retryErr } = await supabase.from("invoices").insert(basicData);
+      if (retryErr) { alert("Error saving invoice: " + retryErr.message); setSaving(false); return; }
+    }
+    if (true) {
       const items = newInv.items.map(i => ({ invoice_id: invId, product_id: +i.productId, product_name: i.name, quantity: +i.qty, price: i.price, original_price: i.originalPrice || i.price, discount_pct: i.discountPct || 0, cost: i.cost }));
       await supabase.from("invoice_items").insert(items);
       // Update stock for each item
       for (const item of newInv.items) {
-        const productId = parseInt(item.productId, 10);
-        const locationId = parseInt(newInv.location_id, 10);
-        const qty = parseInt(item.qty, 10);
-        if (isNaN(productId) || isNaN(locationId) || isNaN(qty)) continue;
-        const { data: rows } = await supabase.from("stock").select("id, quantity").eq("product_id", productId).eq("location_id", locationId);
-        const stockRow = rows && rows[0];
-        if (stockRow) {
+        const productId = +item.productId;
+        const locationId = +newInv.location_id;
+        const qty = +item.qty;
+        const { data: stockRow, error: stockErr } = await supabase.from("stock").select("id, quantity").eq("product_id", productId).eq("location_id", locationId).single();
+        if (stockRow && !stockErr) {
           const newQty = newInv.type === "sell"
             ? Math.max(0, stockRow.quantity - qty)
             : stockRow.quantity + qty;
           await supabase.from("stock").update({ quantity: newQty }).eq("id", stockRow.id);
-        } else if (newInv.type === "buy") {
-          await supabase.from("stock").insert({ product_id: productId, location_id: locationId, quantity: qty });
+        } else {
+          // Stock row doesn't exist yet — create it (for purchases only)
+          if (newInv.type === "buy") {
+            await supabase.from("stock").insert({ product_id: productId, location_id: locationId, quantity: qty });
+          }
         }
       }
+
+      // Distribute shipment fees to product cost prices using weighted average
+      // Recalculates from ALL purchase invoices to avoid stacking
+      if (newInv.type === "buy" && newInv.distributeShipment && shipmentAmt > 0) {
+        const totalItemValue = newInv.items.reduce((s, i) => s + +i.qty * i.price, 0);
+        if (totalItemValue > 0) {
+          await Promise.all(newInv.items.map(async item => {
+            const productId = +item.productId;
+            // Get ALL purchase invoice items for this product to calculate true weighted avg
+            const { data: allInvItems } = await supabase
+              .from("invoice_items")
+              .select("quantity, price, invoice_id")
+              .eq("product_id", productId);
+            const { data: allInvs } = await supabase
+              .from("invoices")
+              .select("id, shipment_value, shipment_type")
+              .eq("type", "buy");
+            const invMap = {};
+            (allInvs || []).forEach(inv => { invMap[inv.id] = inv; });
+            let totalQty = 0, totalCost = 0;
+            (allInvItems || []).forEach(ii => {
+              const inv = invMap[ii.invoice_id];
+              if (!inv) return;
+              const invSubtotal = (allInvItems || []).filter(x => x.invoice_id === ii.invoice_id).reduce((s, x) => s + x.quantity * x.price, 0);
+              const invShipAmt = inv.shipment_type === "pct" ? invSubtotal * (inv.shipment_value || 0) / 100 : (inv.shipment_value || 0);
+              const itemValue = ii.quantity * ii.price;
+              const shipShare = invSubtotal > 0 ? invShipAmt * (itemValue / invSubtotal) : 0;
+              const costPerUnit = ii.price + (ii.quantity > 0 ? shipShare / ii.quantity : 0);
+              totalQty += +ii.quantity;
+              totalCost += costPerUnit * +ii.quantity;
+            });
+            const avgCost = totalQty > 0 ? totalCost / totalQty : +item.price;
+            await supabase.from("products").update({ cost_price: +avgCost.toFixed(4) }).eq("id", productId);
+          }));
+        }
+      }
+
+      // Auto-add shipment charge to shipping company's supplier balance
+      if (newInv.type === "buy" && shipmentAmt > 0 && newInv.shipmentCompany) {
+        // Find supplier by name
+        const { data: shipSupplier } = await supabase.from("suppliers").select("id").ilike("name", newInv.shipmentCompany).single();
+        if (shipSupplier) {
+          const paymentType = newInv.shipmentPaymentStatus === "paid" ? "payment" : "charge";
+          await supabase.from("supplier_payments").insert({
+            supplier_id: shipSupplier.id,
+            date: newInv.date,
+            amount: shipmentAmt,
+            type: "charge",
+            notes: `Shipment for invoice ${invId}`,
+            payment_method: newInv.shipmentPaymentStatus === "paid" ? newInv.shipmentPaymentMethod : null,
+          });
+          // If shipment is already paid, also record the payment
+          if (newInv.shipmentPaymentStatus === "paid") {
+            await supabase.from("supplier_payments").insert({
+              supplier_id: shipSupplier.id,
+              date: newInv.date,
+              amount: shipmentAmt,
+              type: "payment",
+              notes: `Shipment payment for invoice ${invId}`,
+              payment_method: newInv.shipmentPaymentMethod,
+            });
+          }
+        }
+      }
+
+      // Auto-record supplier PAYMENT in both tables
+      if (newInv.type === "buy" && newInv.supplier_id && newInv.paymentStatus !== "pending") {
+        const supplierAmountPaid = newInv.paymentStatus === "paid"
+          ? grandTotal - shipmentAmt
+          : (+newInv.amountPaid || 0);
+        if (supplierAmountPaid > 0) {
+          const payId = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
+          // Insert into supplier_payments (for Supplier Balance)
+          await supabase.from("supplier_payments").insert({
+            supplier_id: +newInv.supplier_id,
+            date: newInv.date,
+            amount: supplierAmountPaid,
+            type: "payment",
+            notes: `Payment for invoice ${invId}`,
+            payment_method: newInv.paymentMethod || null,
+          });
+          // Insert into payments (for Payments page)
+          await supabase.from("payments").insert({
+            id: payId,
+            supplier_id: +newInv.supplier_id,
+            date: newInv.date,
+            amount: supplierAmountPaid,
+            payment_method: newInv.paymentMethod || "cash_usd",
+            notes: `Payment for invoice ${invId}`,
+            reference: newInv.paymentReference || null,
+          });
+        }
+      }
+
       setShowCreate(false);
-      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
+      setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, shipmentCompany: "", shipmentPaymentStatus: "pending", shipmentPaymentMethod: "cash_usd", paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
       onRefresh();
     }
     setSaving(false);
@@ -797,7 +1009,11 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const saveEdit = async () => {
     if (!editInv) return;
     setSaving(true);
-    const amountPaid = editInv.payment_status === "paid" ? editInv.total : editInv.payment_status === "partial" ? (+editInv.amount_paid || 0) : 0;
+    const amountPaid = editInv.payment_status === "paid"
+      ? editInv.total
+      : editInv.payment_status === "partial"
+        ? Math.min(+editInv.amount_paid || 0, editInv.total)
+        : 0;
     await supabase.from("invoices").update({
       customer: editInv.customer,
       date: editInv.date,
@@ -809,35 +1025,6 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       payment_reference: editInv.payment_reference || null,
       notes: editInv.notes || null,
     }).eq("id", editInv.id);
-    // Update items if changed
-    if (editInv.editItems) {
-      // Delete all existing items
-      await supabase.from("invoice_items").delete().eq("invoice_id", editInv.id);
-      // Re-insert updated items
-      if (editInv.editItems.length > 0) {
-        await supabase.from("invoice_items").insert(
-          editInv.editItems.map(i => ({
-            invoice_id: editInv.id,
-            product_id: +i.product_id,
-            product_name: i.product_name,
-            quantity: +i.quantity,
-            price: +i.price,
-            original_price: +i.original_price || +i.price,
-            discount_pct: +i.discount_pct || 0,
-            cost: +i.cost
-          }))
-        );
-        // If this is a purchase, update product cost_price to new price
-        if (editInv.type === "buy") {
-          for (const item of editInv.editItems) {
-            await supabase.from("products").update({ cost_price: +item.price }).eq("id", +item.product_id);
-          }
-        }
-      }
-      // Recalculate total and update invoice
-      const newTotal = editInv.editItems.reduce((s, i) => s + i.quantity * i.price, 0);
-      await supabase.from("invoices").update({ amount_paid: editInv.payment_status === "paid" ? newTotal : amountPaid }).eq("id", editInv.id);
-    }
     setEditInv(null);
     onRefresh();
     setSaving(false);
@@ -850,7 +1037,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       {/* Edit Invoice Modal */}
       {editInv && (
         <div style={{ position:"fixed", inset:0, background:"#000a", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-          <div style={{ background:T.card, border:`1px solid ${T.accent}44`, borderRadius:16, padding:28, width:"100%", maxWidth:600, maxHeight:"90vh", overflowY:"auto" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.accent}44`, borderRadius:16, padding:28, width:"100%", maxWidth:520, maxHeight:"90vh", overflowY:"auto" }}>
             <h3 style={{ fontSize:16, fontWeight:700, marginBottom:6, color:T.accent }}>✏️ Edit Invoice</h3>
             <p style={{ fontSize:12, color:T.muted, marginBottom:20, fontFamily:T.mono }}>{editInv.id} · {editInv.type === "sell" ? "Sale" : "Purchase"}</p>
 
@@ -859,95 +1046,6 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                 <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>{editInv.type === "sell" ? "Customer" : "Supplier"}</div>
                 <input value={editInv.customer} onChange={e => setEditInv({...editInv, customer:e.target.value})} />
               </div>
-              <div>
-                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Date</div>
-                <input type="date" value={editInv.date} onChange={e => setEditInv({...editInv, date:e.target.value})} />
-              </div>
-              <div>
-                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Location</div>
-                <select value={editInv.location_id} onChange={e => setEditInv({...editInv, location_id:e.target.value})}>
-                  {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Notes</div>
-                <input value={editInv.notes || ""} onChange={e => setEditInv({...editInv, notes:e.target.value})} placeholder="Optional" />
-              </div>
-            </div>
-
-            {/* Items Editor */}
-            {editInv.editItems && (
-              <div style={{ marginBottom:16 }}>
-                <div style={{ fontSize:12, color:T.accent, fontWeight:700, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>📦 Items</div>
-                <div style={{ background:T.surface, borderRadius:8, overflow:"hidden", marginBottom:10 }}>
-                  <table>
-                    <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th>Del</th></tr></thead>
-                    <tbody>
-                      {editInv.editItems.map((item, i) => (
-                        <tr key={i}>
-                          <td style={{ fontSize:13 }}>{item.product_name}</td>
-                          <td>
-                            <input type="number" value={item.quantity} min="1"
-                              onChange={e => {
-                                const items = [...editInv.editItems];
-                                items[i] = {...items[i], quantity: +e.target.value};
-                                setEditInv({...editInv, editItems: items, total: items.reduce((s,x)=>s+x.quantity*x.price,0)});
-                              }}
-                              style={{ width:60, padding:"4px 6px", fontSize:12 }} />
-                          </td>
-                          <td>
-                            <input type="number" value={item.price} min="0" step="0.01"
-                              onChange={e => {
-                                const items = [...editInv.editItems];
-                                items[i] = {...items[i], price: +e.target.value};
-                                setEditInv({...editInv, editItems: items, total: items.reduce((s,x)=>s+x.quantity*x.price,0)});
-                              }}
-                              style={{ width:80, padding:"4px 6px", fontSize:12 }} />
-                          </td>
-                          <td style={{ fontFamily:T.mono, color:T.green, fontSize:12 }}>{fmt(item.quantity * item.price)}</td>
-                          <td>
-                            <button onClick={() => {
-                              const items = editInv.editItems.filter((_, idx) => idx !== i);
-                              setEditInv({...editInv, editItems: items, total: items.reduce((s,x)=>s+x.quantity*x.price,0)});
-                            }} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:4, padding:"3px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {/* Add new item */}
-                <div style={{ display:"flex", gap:8, alignItems:"flex-end", flexWrap:"wrap" }}>
-                  <div style={{ flex:2, minWidth:140 }}>
-                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>ADD PRODUCT</div>
-                    <select id="editAddProduct" style={{ fontSize:12 }}>
-                      <option value="">Select product...</option>
-                      {products.map(p => <option key={p.id} value={p.id} data-name={p.name} data-price={editInv.type==="sell"?p.sell_price:p.cost_price} data-cost={p.cost_price}>{p.name}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ width:60 }}>
-                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>QTY</div>
-                    <input type="number" id="editAddQty" defaultValue="1" min="1" style={{ fontSize:12, padding:"4px 6px" }} />
-                  </div>
-                  <button onClick={() => {
-                    const sel = document.getElementById("editAddProduct");
-                    const qty = +document.getElementById("editAddQty").value || 1;
-                    const opt = sel.options[sel.selectedIndex];
-                    if (!sel.value) return;
-                    const newItem = { product_id: +sel.value, product_name: opt.dataset.name, quantity: qty, price: +opt.dataset.price, original_price: +opt.dataset.price, discount_pct: 0, cost: +opt.dataset.cost };
-                    const items = [...editInv.editItems, newItem];
-                    setEditInv({...editInv, editItems: items, total: items.reduce((s,x)=>s+x.quantity*x.price,0)});
-                    sel.value = "";
-                  }} style={{ background:T.accent, color:"#000", border:"none", borderRadius:8, padding:"8px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Add</button>
-                </div>
-                <div style={{ marginTop:10, padding:"10px 14px", background:T.accentDim, borderRadius:8, fontFamily:T.mono, fontSize:14, display:"flex", justifyContent:"space-between" }}>
-                  <span style={{ color:T.muted }}>New Total:</span>
-                  <span style={{ color:T.green, fontWeight:800 }}>{fmt(editInv.editItems.reduce((s,i)=>s+i.quantity*i.price,0))}</span>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
               <div>
                 <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Date</div>
                 <input type="date" value={editInv.date} onChange={e => setEditInv({...editInv, date:e.target.value})} />
@@ -981,8 +1079,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
               {editInv.payment_status === "partial" && (
                 <div style={{ marginTop:10 }}>
                   <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Amount Paid ($)</div>
-                  <input type="number" value={editInv.amount_paid || ""} onChange={e => setEditInv({...editInv, amount_paid:e.target.value})} placeholder="0.00" style={{ maxWidth:200 }} />
-                  <div style={{ fontSize:12, color:T.yellow, marginTop:4, fontFamily:T.mono }}>Remaining: {fmt(editInv.total - (+editInv.amount_paid || 0))}</div>
+                  <input type="number" value={editInv.amount_paid ?? ""} onChange={e => setEditInv({...editInv, amount_paid:e.target.value})} placeholder="0.00" style={{ maxWidth:200 }} min="0" max={editInv.total} />
+                  <div style={{ fontSize:12, color:T.yellow, marginTop:4, fontFamily:T.mono }}>Remaining: {fmt(Math.max(0, editInv.total - (+editInv.amount_paid || 0)))}</div>
                 </div>
               )}
             </div>
@@ -1012,99 +1110,10 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             )}
 
             {/* Summary */}
-            <div style={{ background:T.surface, borderRadius:8, padding:12, marginBottom:16, fontFamily:T.mono, fontSize:13 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+            <div style={{ background:T.surface, borderRadius:8, padding:12, marginBottom:20, fontFamily:T.mono, fontSize:13 }}>
+              <div style={{ display:"flex", justifyContent:"space-between" }}>
                 <span style={{ color:T.muted }}>Invoice Total</span>
                 <span style={{ fontWeight:800, color:T.accent }}>{fmt(editInv.total)}</span>
-              </div>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                <span style={{ color:T.muted }}>Total Paid</span>
-                <span style={{ fontWeight:700, color:T.green }}>{fmt(Math.max((editInv.invPayments||[]).reduce((s,p)=>s+(+p.amount),0), editInv.amount_paid || 0))}</span>
-              </div>
-              <div style={{ display:"flex", justifyContent:"space-between", borderTop:`1px solid ${T.border}`, paddingTop:6 }}>
-                <span style={{ color:T.muted }}>Remaining Balance</span>
-                <span style={{ fontWeight:800, color:T.red }}>{fmt(Math.max(0, editInv.total - Math.max((editInv.invPayments||[]).reduce((s,p)=>s+(+p.amount),0), editInv.amount_paid || 0)))}</span>
-              </div>
-            </div>
-
-            {/* Payment History */}
-            <div style={{ marginBottom:16 }}>
-              <div style={{ fontSize:12, color:T.accent, fontWeight:700, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>💳 Payment History</div>
-              {(editInv.invPayments||[]).length > 0 ? (
-                <div style={{ background:T.surface, borderRadius:8, overflow:"hidden", marginBottom:10 }}>
-                  <table>
-                    <thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Del</th></tr></thead>
-                    <tbody>
-                      {(editInv.invPayments||[]).map((p,i) => (
-                        <tr key={i}>
-                          <td style={{ fontSize:12, color:T.muted }}>{p.date}</td>
-                          <td><Badge color={p.payment_method==="cash_usd"?T.green:p.payment_method==="wallet_usdt"?T.accent:T.yellow}>{p.payment_method==="cash_usd"?"💵 Cash":p.payment_method==="wallet_usdt"?"💎 USDT":"🏦 Bank"}</Badge></td>
-                          <td style={{ fontSize:11, color:T.muted, fontFamily:T.mono }}>{p.reference||"—"}</td>
-                          <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{fmt(p.amount)}</td>
-                          <td><button onClick={async () => {
-                            const table = editInv.type==="sell" ? "client_payments" : "supplier_payments";
-                            await supabase.from(table).delete().eq("id", p.id);
-                            const newPmts = editInv.invPayments.filter((_,idx)=>idx!==i);
-                            const totalPd = newPmts.reduce((s,x)=>s+(+x.amount),0);
-                            const newStatus = totalPd<=0?"pending":totalPd>=editInv.total?"paid":"partial";
-                            await supabase.from("invoices").update({ payment_status:newStatus, status:newStatus, amount_paid:totalPd }).eq("id", editInv.id);
-                            setEditInv({...editInv, invPayments:newPmts, payment_status:newStatus, amount_paid:totalPd});
-                            onRefresh();
-                          }} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:4, padding:"3px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{ fontSize:12, color:T.muted, marginBottom:10, padding:"8px 12px", background:T.surface, borderRadius:8 }}>No payments recorded yet</div>
-              )}
-
-              {/* Add new payment */}
-              <div style={{ background:T.surface, borderRadius:8, padding:14, border:`1px solid ${T.green}33` }}>
-                <div style={{ fontSize:12, color:T.green, fontWeight:700, marginBottom:10 }}>+ Add Payment</div>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:10, marginBottom:10 }}>
-                  <div>
-                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>DATE</div>
-                    <input type="date" value={editInv.newPmt?.date || new Date().toISOString().slice(0,10)} onChange={e => setEditInv({...editInv, newPmt:{...editInv.newPmt, date:e.target.value}})} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>AMOUNT ($)</div>
-                    <input type="number" value={editInv.newPmt?.amount || ""} onChange={e => setEditInv({...editInv, newPmt:{...editInv.newPmt, amount:e.target.value}})} placeholder="0.00" />
-                  </div>
-                  <div>
-                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>METHOD</div>
-                    <select value={editInv.newPmt?.method || "cash_usd"} onChange={e => setEditInv({...editInv, newPmt:{...editInv.newPmt, method:e.target.value}})}>
-                      <option value="cash_usd">💵 Cash USD</option>
-                      <option value="wallet_usdt">💎 Wallet USDT</option>
-                      <option value="bank_transfer">🏦 Bank Transfer</option>
-                    </select>
-                  </div>
-                  <div>
-                    <div style={{ fontSize:11, color:T.muted, marginBottom:3 }}>REFERENCE #</div>
-                    <input value={editInv.newPmt?.reference || ""} onChange={e => setEditInv({...editInv, newPmt:{...editInv.newPmt, reference:e.target.value}})} placeholder="Tx ID / Ref" />
-                  </div>
-                </div>
-                <button onClick={async () => {
-                  if (!editInv.newPmt?.amount) return;
-                  const pmt = { date: editInv.newPmt?.date || new Date().toISOString().slice(0,10), amount: +editInv.newPmt.amount, payment_method: editInv.newPmt?.method || "cash_usd", reference: editInv.newPmt?.reference || "", type: "payment", invoice_id: editInv.id };
-                  // Save to correct table with invoice_id
-                  if (editInv.type === "sell" && editInv.client_id) {
-                    const { data } = await supabase.from("client_payments").insert({ client_id: editInv.client_id, ...pmt, notes: "" }).select().single();
-                    pmt.id = data?.id;
-                  } else if (editInv.type === "buy" && editInv.supplier_id) {
-                    const { data } = await supabase.from("supplier_payments").insert({ supplier_id: editInv.supplier_id, ...pmt, notes: "" }).select().single();
-                    pmt.id = data?.id;
-                  }
-                  const newPmts = [...(editInv.invPayments||[]), pmt];
-                  const totalPd = newPmts.reduce((s,p)=>s+(+p.amount),0);
-                  const newStatus = totalPd<=0?"pending":totalPd>=editInv.total?"paid":"partial";
-                  await supabase.from("invoices").update({ payment_status:newStatus, status:newStatus, amount_paid:totalPd }).eq("id", editInv.id);
-                  setEditInv({...editInv, invPayments:newPmts, payment_status:newStatus, amount_paid:totalPd, newPmt:null});
-                  onRefresh();
-                }} style={{ background:T.green, color:"#000", border:"none", borderRadius:8, padding:"8px 20px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-                  + Record Payment
-                </button>
               </div>
             </div>
 
@@ -1116,13 +1125,14 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 28, fontWeight: 800 }}>Invoices</h2>
-          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{invoices.length} total invoices</p>
+          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>{filtered.length} of {invoices.length} invoices</p>
         </div>
         <Btn onClick={() => setShowCreate(!showCreate)}>+ New Invoice</Btn>
       </div>
+      <DateFilter value={datePeriod} onChange={setDatePeriod} />
 
       {showCreate && (
         <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 24, marginBottom: 24 }}>
@@ -1179,19 +1189,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                   setItemForm({ ...itemForm, productId: e.target.value, customPrice: prod ? (newInv.type === "sell" ? prod.sell_price : prod.cost_price) : "" });
                 }}>
                   <option value="">Select product...</option>
-                  {products.map(p => {
-                    const stock = newInv.location_id ? (p.stockByLocation?.[+newInv.location_id] || 0) : p.totalStock;
-                    return <option key={p.id} value={p.id}>{p.name} ({p.sku}) — Stock: {stock}</option>;
-                  })}
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
                 </select>
-                {/* Show stock alert for selected product */}
-                {itemForm.productId && newInv.location_id && (() => {
-                  const prod = products.find(p => p.id === +itemForm.productId);
-                  const stock = prod?.stockByLocation?.[+newInv.location_id] || 0;
-                  return <div style={{ fontSize: 12, marginTop: 6, fontFamily: T.mono, color: stock < 3 ? T.red : stock < 8 ? T.yellow : T.green, fontWeight: 700 }}>
-                    📦 Available: {stock} units{stock === 0 ? " ⚠️ OUT OF STOCK" : stock < 5 ? " ⚠️ Low" : ""}
-                  </div>;
-                })()}
               </div>
               <div>
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>QTY</div>
@@ -1226,16 +1225,6 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     </tr>
                   ))}
                 </tbody>
-                <tfoot>
-                  <tr style={{ borderTop: `2px solid ${T.border}`, background: T.accentDim }}>
-                    <td style={{ fontWeight: 700, color: T.accent }}>TOTALS</td>
-                    <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.accent }}>{newInv.items.reduce((s, i) => s + +i.qty, 0)} units</td>
-                    <td></td><td></td>
-                    <td></td>
-                    <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.green }}>{fmt(newInv.items.reduce((s, i) => s + i.qty * i.price, 0))}</td>
-                    <td></td>
-                  </tr>
-                </tfoot>
               </table>
             </div>
           )}
@@ -1244,7 +1233,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
           {newInv.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: T.accent, fontWeight: 700, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>🚢 Shipment Fees</div>
-              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
                 <select value={newInv.shipmentType} onChange={e => setNewInv({ ...newInv, shipmentType: e.target.value })} style={{ width: "auto" }}>
                   <option value="fixed">Fixed Amount ($)</option>
                   <option value="pct">Percentage (% of subtotal)</option>
@@ -1252,6 +1241,68 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                 <input type="number" value={newInv.shipmentValue} onChange={e => setNewInv({ ...newInv, shipmentValue: e.target.value })} placeholder="0" style={{ width: 120 }} min="0" />
                 {shipmentAmt > 0 && <span style={{ fontFamily: T.mono, fontSize: 13, color: T.accent }}>+ {fmt(shipmentAmt)} shipment</span>}
               </div>
+              {shipmentAmt > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Shipping Company</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <select value={newInv.shipmentCompany} onChange={e => setNewInv({ ...newInv, shipmentCompany: e.target.value })} style={{ width: "auto", maxWidth: 280 }}>
+                      <option value="">Select or type below...</option>
+                      {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                    </select>
+                    <input value={newInv.shipmentCompany} onChange={e => setNewInv({ ...newInv, shipmentCompany: e.target.value })} placeholder="Or type custom name..." style={{ maxWidth: 200 }} />
+                  </div>
+                </div>
+              )}
+              {newInv.type === "buy" && shipmentAmt > 0 && (
+                <>
+                  <div style={{ background: T.card, borderRadius: 8, padding: 12, marginBottom: 12, border: `1px solid ${T.accent}33` }}>
+                    <div style={{ fontSize: 11, color: T.accent, fontWeight: 700, marginBottom: 10, textTransform: "uppercase" }}>💳 Shipment Payment (separate from supplier)</div>
+                    <div style={{ fontSize: 11, color: T.muted, marginBottom: 8 }}>Payment Status to Shipping Company</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                      {[
+                        { val: "pending", label: "⏳ Pending", color: T.red },
+                        { val: "paid", label: "✅ Paid", color: T.green },
+                      ].map(opt => (
+                        <button key={opt.val} onClick={() => setNewInv({ ...newInv, shipmentPaymentStatus: opt.val })} style={{ background: newInv.shipmentPaymentStatus === opt.val ? opt.color+"33" : "transparent", color: newInv.shipmentPaymentStatus === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.shipmentPaymentStatus === opt.val ? opt.color : T.border}`, borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {newInv.shipmentPaymentStatus === "paid" && (
+                      <div>
+                        <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>Shipment Payment Method</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {[
+                            { val: "cash_usd", label: "💵 Cash USD", color: T.green },
+                            { val: "wallet_usdt", label: "💎 Wallet USDT", color: T.accent },
+                            { val: "bank_transfer", label: "🏦 Bank Transfer", color: T.yellow },
+                          ].map(opt => (
+                            <button key={opt.val} onClick={() => setNewInv({ ...newInv, shipmentPaymentMethod: opt.val })} style={{ background: newInv.shipmentPaymentMethod === opt.val ? opt.color+"33" : "transparent", color: newInv.shipmentPaymentMethod === opt.val ? opt.color : T.muted, border: `2px solid ${newInv.shipmentPaymentMethod === opt.val ? opt.color : T.border}`, borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 10, background: T.card, borderRadius: 8, padding: "10px 14px", border: `1px solid ${newInv.distributeShipment ? T.yellow+"66" : T.border}` }}>
+                    <input type="checkbox" id="distShip" checked={newInv.distributeShipment} onChange={e => setNewInv({ ...newInv, distributeShipment: e.target.checked })} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                    <label htmlFor="distShip" style={{ fontSize: 13, color: newInv.distributeShipment ? T.yellow : T.muted, cursor: "pointer", fontWeight: newInv.distributeShipment ? 700 : 400 }}>
+                      📦 Distribute {fmt(shipmentAmt)} to product cost prices
+                    </label>
+                    {newInv.distributeShipment && (
+                      <div style={{ marginLeft: "auto", fontSize: 11, color: T.muted }}>
+                        {newInv.items.map(item => {
+                          const itemValue = +item.qty * item.price;
+                          const total = newInv.items.reduce((s,i) => s + +i.qty * i.price, 0);
+                          const share = total > 0 ? shipmentAmt * (itemValue / total) / +item.qty : 0;
+                          return <div key={item.productId}>{item.name}: +{fmt(share)}/unit</div>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1290,7 +1341,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
           {/* Payment Section — for all invoices when items exist */}
           {newInv.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16, border: `1px solid ${T.yellow}33` }}>
-              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 }}>💳 Payment Details</div>
+              <div style={{ fontSize: 12, color: T.yellow, fontWeight: 700, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 }}>💳 {newInv.type === "buy" ? "Supplier Payment" : "Payment Details"}</div>
 
               {/* Payment Status — for both sales and purchases */}
               <div style={{ marginBottom: 14 }}>
@@ -1376,7 +1427,12 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     <td><Badge color={inv.type === "sell" ? T.green : T.yellow}>{inv.type === "sell" ? "SALE" : "BUY"}</Badge></td>
                     <td className="hide-mobile" style={{ color: T.muted, fontSize: 12 }}>{inv.date}</td>
                     <td className="hide-mobile" style={{ fontSize: 12 }}>{inv.locationName}</td>
-                    <td style={{ fontWeight: 600 }}>{inv.customer}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      <div>{inv.customer}</div>
+                      {inv.type === "buy" && inv.shipment_company && (
+                        <div style={{ fontSize: 11, color: T.accent, marginTop: 2 }}>🚢 {inv.shipment_company}</div>
+                      )}
+                    </td>
                     <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
                     <td>
                       <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
@@ -1397,22 +1453,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     <td className="hide-mobile">
                       {pm ? <Badge color={pm==="cash_usd"?T.green:pm==="wallet_usdt"?T.accent:T.yellow}>{pm==="cash_usd"?"💵 Cash":pm==="wallet_usdt"?"💎 USDT":"🏦 Bank"}</Badge> : <span style={{ color:T.muted, fontSize:12 }}>—</span>}
                     </td>
-                    <td><button onClick={async () => {
-                      const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
-                      // Load ONLY payments linked to this specific invoice
-                      let invPayments = [];
-                      if (inv.type === "sell" && inv.client_id) {
-                        const { data } = await supabase.from("client_payments").select("*").eq("client_id", inv.client_id).eq("invoice_id", inv.id).order("date", { ascending: true });
-                        invPayments = data || [];
-                      } else if (inv.type === "buy" && inv.supplier_id) {
-                        const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", inv.supplier_id).eq("invoice_id", inv.id).order("date", { ascending: true });
-                        invPayments = data || [];
-                      }
-                      // Use amount_paid from invoice as fallback if no linked payments
-                      const totalFromPayments = invPayments.reduce((s,p)=>s+(+p.amount),0);
-                      const totalPaid = totalFromPayments > 0 ? totalFromPayments : (inv.amount_paid || 0);
-                      setEditInv({ ...inv, payment_status: inv.payment_status || inv.status || "paid", payment_method: inv.payment_method || "cash_usd", editItems: items || [], invPayments, totalPaid });
-                    }} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 10px", color:T.accent, fontSize:12, cursor:"pointer" }}>✏️</button></td>
+                    <td><button onClick={() => setEditInv({ ...inv, payment_status: inv.payment_status || "pending", amount_paid: inv.amount_paid || 0, payment_method: inv.payment_method || "cash_usd" })} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 10px", color:T.accent, fontSize:12, cursor:"pointer" }}>✏️</button></td>
                     <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
                     <td><button onClick={async () => {
                       if(window.confirm(`Delete this ${inv.type === "sell" ? "sale" : "purchase"} invoice? Stock will be reversed automatically.`)) {
@@ -1461,8 +1502,10 @@ function ProfitLoss({ invoices, locations, userProfile }) {
     return true;
   });
   const sells = filtered.filter(i => i.type === "sell" && i.status === "paid");
+  const sellsPending = filtered.filter(i => i.type === "sell" && i.status !== "paid");
   const buys = filtered.filter(i => i.type === "buy" && i.status === "paid");
   const revenue = sells.reduce((s, i) => s + i.total, 0);
+  const pendingRevenue = sellsPending.reduce((s, i) => s + i.total, 0);
   const cogs = sells.reduce((s, i) => s + i.cogs, 0);
   const purchases = buys.reduce((s, i) => s + i.total, 0);
   const grossProfit = revenue - cogs;
@@ -1486,7 +1529,8 @@ function ProfitLoss({ invoices, locations, userProfile }) {
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 28 }}>
           <h3 style={{ fontSize: 13, letterSpacing: 2, textTransform: "uppercase", color: T.accent, marginBottom: 20 }}>Income Statement</h3>
           {[
-            { label: "Sales Revenue", val: revenue, color: T.green },
+            { label: "Paid Revenue", val: revenue, color: T.green },
+            { label: "Pending Revenue", val: pendingRevenue, color: T.yellow },
             { label: "Cost of Goods Sold", val: -cogs, color: T.red },
             null,
             { label: "Gross Profit", val: grossProfit, color: grossProfit >= 0 ? T.green : T.red, bold: true },
@@ -1549,13 +1593,7 @@ function ClientsPage({ clients, onRefresh }) {
     if (editClient) {
       if (!editClient.name) return;
       setSaving(true);
-      if (editClient.name !== clients.find(c=>c.id===editClient.id)?.name) {
-        await supabase.from("invoices").update({ customer: editClient.name }).eq("client_id", editClient.id);
-      }
-      await supabase.from("clients").update({
-        name: editClient.name, phone: editClient.phone||"", email: editClient.email||"",
-        address: editClient.address||"", notes: editClient.notes||""
-      }).eq("id", editClient.id);
+      await supabase.from("clients").update({ name: editClient.name, phone: editClient.phone, email: editClient.email, address: editClient.address, notes: editClient.notes }).eq("id", editClient.id);
       setEditClient(null);
     } else {
       if (!form.name) return;
@@ -1566,7 +1604,6 @@ function ClientsPage({ clients, onRefresh }) {
     setForm({ name: "", phone: "", email: "", address: "", notes: "" });
     onRefresh();
     setSaving(false);
-  };
   };
 
   const del = async (id) => {
@@ -1617,7 +1654,7 @@ function ClientsPage({ clients, onRefresh }) {
                 <td className="hide-mobile" style={{ fontSize: 12, color: T.muted }}>{c.address || "—"}</td>
                 <td>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => { setEditClient(c); setForm({ name: c.name, phone: c.phone||"", email: c.email||"", address: c.address||"", notes: c.notes||"" }); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                    <button onClick={() => { setEditClient(c); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
                     <button onClick={() => del(c.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
                   </div>
                 </td>
@@ -1642,13 +1679,7 @@ function SuppliersPage({ suppliers, onRefresh }) {
     if (editSupplier) {
       if (!editSupplier.name) return;
       setSaving(true);
-      if (editSupplier.name !== suppliers.find(s=>s.id===editSupplier.id)?.name) {
-        await supabase.from("invoices").update({ customer: editSupplier.name }).eq("supplier_id", editSupplier.id);
-      }
-      await supabase.from("suppliers").update({
-        name: editSupplier.name, phone: editSupplier.phone||"", email: editSupplier.email||"",
-        contact_person: editSupplier.contact_person||"", address: editSupplier.address||"", notes: editSupplier.notes||""
-      }).eq("id", editSupplier.id);
+      await supabase.from("suppliers").update({ name: editSupplier.name, phone: editSupplier.phone, email: editSupplier.email, contact_person: editSupplier.contact_person, address: editSupplier.address, notes: editSupplier.notes }).eq("id", editSupplier.id);
       setEditSupplier(null);
     } else {
       if (!form.name) return;
@@ -1709,7 +1740,7 @@ function SuppliersPage({ suppliers, onRefresh }) {
                 <td className="hide-mobile" style={{ fontSize: 12, color: T.muted }}>{s.email || "—"}</td>
                 <td>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => { setEditSupplier(s); setForm({ name: s.name, phone: s.phone||"", email: s.email||"", contact_person: s.contact_person||"", address: s.address||"", notes: s.notes||"" }); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                    <button onClick={() => { setEditSupplier(s); setShowAdd(false); }} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
                     <button onClick={() => del(s.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
                   </div>
                 </td>
@@ -1731,7 +1762,7 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
   const [saving, setSaving] = useState(false);
   const [converting, setConverting] = useState(null);
   const [newOrder, setNewOrder] = useState({ location_id: "", customer: "", date: new Date().toISOString().slice(0, 10), notes: "", items: [] });
-  const [itemForm, setItemForm] = useState({ productId: "", qty: 1 });
+  const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -1750,8 +1781,11 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
   const addItem = () => {
     const prod = products.find(p => p.id === +itemForm.productId);
     if (!prod) return;
-    setNewOrder({ ...newOrder, items: [...newOrder.items, { productId: prod.id, name: prod.name, qty: +itemForm.qty, price: prod.sell_price, cost: prod.cost_price }] });
-    setItemForm({ productId: "", qty: 1 });
+    const basePrice = itemForm.customPrice !== "" ? +itemForm.customPrice : prod.sell_price;
+    const discPct = +itemForm.discountPct || 0;
+    const finalPrice = basePrice * (1 - discPct / 100);
+    setNewOrder({ ...newOrder, items: [...newOrder.items, { productId: prod.id, name: prod.name, qty: +itemForm.qty, price: finalPrice, originalPrice: basePrice, discountPct: discPct, cost: prod.cost_price }] });
+    setItemForm({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
   };
 
   const saveOrder = async () => {
@@ -1859,33 +1893,50 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
           <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ flex: 2, minWidth: 160 }}>
               <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRODUCT</div>
-              <select value={itemForm.productId} onChange={e => setItemForm({ ...itemForm, productId: e.target.value })}>
+              <select value={itemForm.productId} onChange={e => {
+                const prod = products.find(p => p.id === +e.target.value);
+                setItemForm({ ...itemForm, productId: e.target.value, customPrice: prod ? prod.sell_price : "" });
+              }}>
                 <option value="">Select product...</option>
                 {products.map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.sell_price)}</option>)}
               </select>
             </div>
-            <div style={{ width: 80 }}>
+            <div style={{ width: 70 }}>
               <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>QTY</div>
               <input type="number" value={itemForm.qty} onChange={e => setItemForm({ ...itemForm, qty: e.target.value })} min="1" />
+            </div>
+            <div style={{ width: 120 }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRICE ($)</div>
+              <input type="number" value={itemForm.customPrice} onChange={e => setItemForm({ ...itemForm, customPrice: e.target.value })} placeholder="Default" min="0" />
+            </div>
+            <div style={{ width: 90 }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DISC (%)</div>
+              <input type="number" value={itemForm.discountPct} onChange={e => setItemForm({ ...itemForm, discountPct: e.target.value })} placeholder="0" min="0" max="100" />
             </div>
             <Btn small onClick={addItem} disabled={!itemForm.productId}>Add</Btn>
           </div>
           {newOrder.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
               <table>
-                <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
+                <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Disc</th><th>Total</th><th></th></tr></thead>
                 <tbody>
                   {newOrder.items.map((item, i) => (
                     <tr key={i}>
                       <td>{item.name}</td>
                       <td style={{ fontFamily: T.mono }}>{item.qty}</td>
-                      <td style={{ fontFamily: T.mono }}>{fmt(item.price)}</td>
+                      <td style={{ fontFamily: T.mono }}>
+                        {item.discountPct > 0 && <span style={{ textDecoration: "line-through", color: T.muted, fontSize: 11, marginRight: 4 }}>{fmt(item.originalPrice || item.price)}</span>}
+                        {fmt(item.price)}
+                      </td>
+                      <td style={{ fontFamily: T.mono, color: T.yellow }}>{item.discountPct > 0 ? `${item.discountPct}%` : "—"}</td>
                       <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(item.qty * item.price)}</td>
+                      <td><button onClick={() => setNewOrder({ ...newOrder, items: newOrder.items.filter((_, j) => j !== i) })} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 4, padding: "2px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>✕</button></td>
                     </tr>
                   ))}
                   <tr>
-                    <td colSpan={3} style={{ textAlign: "right", fontWeight: 700 }}>Total</td>
+                    <td colSpan={4} style={{ textAlign: "right", fontWeight: 700 }}>Total</td>
                     <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.accent }}>{fmt(newOrder.items.reduce((s, i) => s + i.qty * i.price, 0))}</td>
+                    <td></td>
                   </tr>
                 </tbody>
               </table>
@@ -2373,8 +2424,8 @@ function StockTransfer({ products, locations, onRefresh }) {
 }
 
 // ─── REPORTS ──────────────────────────────────────────────────────────────────
-function Reports({ invoices, products, locations }) {
-  const [period, setPeriod] = useState("this_month");
+function Reports({ invoices, products, locations, setPage }) {
+  const [period, setPeriod] = useState("all");
   const now = new Date();
 
   const filtered = invoices.filter(i => {
@@ -2387,28 +2438,22 @@ function Reports({ invoices, products, locations }) {
     return true;
   });
 
-  const getStatus = i => i.payment_status || i.status || "pending";
-  const sells = filtered.filter(i => i.type==="sell");
-  const paidSells = sells.filter(i => getStatus(i) === "paid");
-  const buys = filtered.filter(i => i.type==="buy");
-  const paidBuys = buys.filter(i => getStatus(i) === "paid");
-  const revenue = paidSells.reduce((s,i)=>s+i.total,0);
-  const revenuePending = sells.filter(i=>getStatus(i)!=="paid").reduce((s,i)=>s+i.total,0);
+  const sells = filtered.filter(i => i.type==="sell" && (i.status==="paid" || i.status==="pending" || i.status==="partial"));
+  const buys = filtered.filter(i => i.type==="buy" && (i.status==="paid" || i.status==="pending" || i.status==="partial"));
+  const paidSells = sells.filter(i => i.status==="paid");
+  const revenue = sells.reduce((s,i)=>s+i.total,0);
+  const paidRevenue = paidSells.reduce((s,i)=>s+i.total,0);
+  const pendingRevenue = revenue - paidRevenue;
   const cogs = paidSells.reduce((s,i)=>s+i.cogs,0);
-  const profit = revenue - cogs;
-  const expectedProfit = sells.reduce((s,i)=>s+i.profit,0);
+  const profit = paidRevenue - cogs;
 
-  // Daily breakdown — all sells
+  // Daily breakdown
   const daily = {};
   sells.forEach(inv => {
-    if (!daily[inv.date]) daily[inv.date] = { revenue: 0, profit: 0, count: 0, pending: 0 };
-    if (getStatus(inv) === "paid") {
-      daily[inv.date].revenue += inv.total;
-      daily[inv.date].profit += inv.profit;
-      daily[inv.date].count++;
-    } else {
-      daily[inv.date].pending += inv.total;
-    }
+    if (!daily[inv.date]) daily[inv.date] = { revenue: 0, profit: 0, count: 0 };
+    daily[inv.date].revenue += inv.total;
+    daily[inv.date].profit += inv.profit;
+    daily[inv.date].count++;
   });
   const dailyArr = Object.entries(daily).sort((a,b)=>b[0].localeCompare(a[0]));
 
@@ -2441,54 +2486,12 @@ function Reports({ invoices, products, locations }) {
       </div>
 
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${paidSells.length} paid sales`} />
-        <StatCard label="Pending Revenue" value={fmt(revenuePending)} icon="⏳" color={T.yellow} sub={`${sells.filter(i=>getStatus(i)!=="paid").length} pending`} />
-        <StatCard label="Net Profit (All)" value={fmt(expectedProfit)} icon="🎯" color={expectedProfit>=0?T.green:T.red} sub="All invoices combined" />
-        <StatCard label="Purchases" value={fmt(paidBuys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${paidBuys.length} orders`} />
-        <StatCard label="Avg Sale" value={fmt(paidSells.length?revenue/paidSells.length:0)} icon="📊" color={T.accent} sub="per invoice" />
-      </div>
-
-      {/* Expected Profit per Invoice */}
-      <div style={{ marginBottom: 20, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: T.green }}>🎯 Expected Profit by Invoice</h3>
-          <span style={{ fontFamily: T.mono, color: T.green, fontWeight: 800 }}>Total: {fmt(expectedProfit)}</span>
-        </div>
-        <table>
-          <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Status</th><th>Revenue</th><th>Cost</th><th style={{ color:T.green }}>Profit</th><th>Margin</th></tr></thead>
-          <tbody>
-            {sells.map(inv => {
-              const invProfit = inv.profit || 0;
-              const invCogs = inv.cogs || 0;
-              const margin = inv.total > 0 ? ((invProfit/inv.total)*100).toFixed(1) : 0;
-              const status = getStatus(inv);
-              return (
-                <tr key={inv.id}>
-                  <td style={{ fontFamily:T.mono, color:T.accent, fontSize:12 }}>{inv.id}</td>
-                  <td style={{ fontSize:12, color:T.muted }}>{inv.date}</td>
-                  <td style={{ fontWeight:600 }}>{inv.customer}</td>
-                  <td><Badge color={status==="paid"?T.green:status==="partial"?T.yellow:T.red}>{status.toUpperCase()}</Badge></td>
-                  <td style={{ fontFamily:T.mono }}>{fmt(inv.total)}</td>
-                  <td style={{ fontFamily:T.mono, color:T.muted }}>{fmt(invCogs)}</td>
-                  <td style={{ fontFamily:T.mono, fontWeight:800, color:invProfit>=0?T.green:T.red, fontSize:14 }}>{fmt(invProfit)}</td>
-                  <td><span style={{ background:+margin>20?T.green+"22":T.yellow+"22", color:+margin>20?T.green:T.yellow, borderRadius:6, padding:"2px 8px", fontFamily:T.mono, fontSize:12 }}>{margin}%</span></td>
-                </tr>
-              );
-            })}
-            {sells.length === 0 && <tr><td colSpan={8} style={{ textAlign:"center", color:T.muted, padding:24 }}>No sales in this period</td></tr>}
-          </tbody>
-          {sells.length > 0 && (
-            <tfoot>
-              <tr style={{ background:T.green+"11", borderTop:`2px solid ${T.green}44` }}>
-                <td colSpan={4} style={{ fontWeight:700, color:T.green, padding:"12px 16px" }}>NET PROFIT (ALL INVOICES)</td>
-                <td style={{ fontFamily:T.mono, fontWeight:700 }}>{fmt(sells.reduce((s,i)=>s+i.total,0))}</td>
-                <td style={{ fontFamily:T.mono, fontWeight:700, color:T.muted }}>{fmt(sells.reduce((s,i)=>s+i.cogs,0))}</td>
-                <td style={{ fontFamily:T.mono, fontWeight:800, color:T.green, fontSize:16 }}>{fmt(expectedProfit)}</td>
-                <td></td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
+        <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} onClick={() => setPage("invoices")} />
+        <StatCard label="Paid Revenue" value={fmt(paidRevenue)} icon="✅" color={T.green} sub={`${paidSells.length} paid`} onClick={() => setPage("invoices")} />
+        <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sells.length - paidSells.length} pending`} onClick={() => setPage("invoices")} />
+        <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} onClick={() => setPage("pl")} />
+        <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} onClick={() => setPage("invoices")} />
+        <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" onClick={() => setPage("invoices")} />
       </div>
 
       <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -2498,18 +2501,17 @@ function Reports({ invoices, products, locations }) {
             <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: T.accent }}>Daily Breakdown</h3>
           </div>
           <table>
-            <thead><tr><th>Date</th><th>Paid</th><th>Revenue</th><th>Pending</th><th>Profit</th></tr></thead>
+            <thead><tr><th>Date</th><th>Sales</th><th>Revenue</th><th>Profit</th></tr></thead>
             <tbody>
               {dailyArr.slice(0, 15).map(([date, d]) => (
                 <tr key={date}>
                   <td style={{ fontFamily: T.mono, fontSize: 12 }}>{date}</td>
                   <td style={{ fontFamily: T.mono, color: T.muted }}>{d.count}</td>
                   <td style={{ fontFamily: T.mono }}>{fmt(d.revenue)}</td>
-                  <td style={{ fontFamily: T.mono, color: T.yellow }}>{d.pending > 0 ? fmt(d.pending) : "—"}</td>
                   <td style={{ fontFamily: T.mono, color: d.profit>=0?T.green:T.red }}>{fmt(d.profit)}</td>
                 </tr>
               ))}
-              {dailyArr.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No sales in this period</td></tr>}
+              {dailyArr.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No sales in this period</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2542,23 +2544,18 @@ function Reports({ invoices, products, locations }) {
           <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: T.accent }}>Performance by Location</h3>
         </div>
         <table>
-          <thead><tr><th>Location</th><th>All Sales</th><th>Paid</th><th>Pending</th><th>Profit</th><th>Margin</th></tr></thead>
+          <thead><tr><th>Location</th><th>Sales</th><th>Revenue</th><th>Profit</th><th>Margin</th></tr></thead>
           <tbody>
             {locations.map(l => {
               const ls = sells.filter(i => i.location_id===l.id);
-              const lsPaid = ls.filter(i => getStatus(i)==="paid");
-              const lsPending = ls.filter(i => getStatus(i)!=="paid");
-              const lr = lsPaid.reduce((s,i)=>s+i.total,0);
-              const lrPending = lsPending.reduce((s,i)=>s+i.total,0);
-              const lp = lsPaid.reduce((s,i)=>s+i.profit,0);
+              const lr = ls.reduce((s,i)=>s+i.total,0);
+              const lp = ls.reduce((s,i)=>s+i.profit,0);
               const lm = lr>0?(lp/lr*100).toFixed(1):0;
-              if (ls.length === 0) return null;
               return (
                 <tr key={l.id}>
                   <td style={{ fontWeight: 600 }}>🏢 {l.name}</td>
                   <td style={{ fontFamily: T.mono }}>{ls.length}</td>
-                  <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(lr)}</td>
-                  <td style={{ fontFamily: T.mono, color: T.yellow }}>{lrPending > 0 ? fmt(lrPending) : "—"}</td>
+                  <td style={{ fontFamily: T.mono }}>{fmt(lr)}</td>
                   <td style={{ fontFamily: T.mono, color: lp>=0?T.green:T.red }}>{fmt(lp)}</td>
                   <td style={{ fontFamily: T.mono, color: +lm>20?T.green:T.yellow }}>{lm}%</td>
                 </tr>
@@ -2577,7 +2574,13 @@ function ClientBalance({ clients, invoices, onRefresh }) {
   const [payments, setPayments] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
+
+  const reloadPayments = async () => {
+    const { data } = await supabase.from("client_payments").select("*").eq("client_id", selected).order("date", { ascending: false });
+    setPayments(data || []);
+  };
 
   useEffect(() => {
     if (selected) {
@@ -2585,39 +2588,131 @@ function ClientBalance({ clients, invoices, onRefresh }) {
     }
   }, [selected]);
 
-  const clientInvoices = invoices.filter(i => i.type==="sell" && i.client_id === selected);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const clientInvoices = invoices.filter(i => {
+    if (i.type !== "sell" || i.client_id !== selected) return false;
+    if (fromDate && i.date < fromDate) return false;
+    if (toDate && i.date > toDate) return false;
+    return true;
+  });
   const totalCharged = clientInvoices.reduce((s,i)=>s+i.total,0);
   const totalPaid = payments.filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
-  const balance = totalCharged - totalPaid;
+  const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
+  const balance = totalCharged + totalCharges - totalPaid;
+
+  const refreshInvoices = async () => {
+    const { data: allPayments } = await supabase.from("client_payments").select("*").eq("client_id", selected);
+    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
+    const allInvoices = invoices.filter(i => i.type==="sell" && i.client_id === selected);
+    // Reset all invoices first
+    for (const inv of allInvoices) {
+      await supabase.from("invoices").update({ payment_status: "pending", status: "pending", amount_paid: 0 }).eq("id", inv.id);
+    }
+    let remaining = newTotalPaid;
+    for (const inv of allInvoices) {
+      if (remaining >= inv.total) { await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id); remaining -= inv.total; }
+      else if (remaining > 0) { await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id); remaining = 0; }
+    }
+    onRefresh();
+  };
 
   const save = async () => {
     if (!form.amount || !selected) return;
     setSaving(true);
     await supabase.from("client_payments").insert({ client_id: selected, date: form.date, amount: +form.amount, type: form.type, notes: form.notes });
-
-    // Recalculate total paid after this payment
-    const { data: allPayments } = await supabase.from("client_payments").select("*").eq("client_id", selected);
-    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
-
-    // Auto-update pending/partial invoices for this client
-    const pendingInvoices = clientInvoices.filter(i => i.payment_status !== "paid");
-    let remaining = newTotalPaid;
-    for (const inv of pendingInvoices) {
-      if (remaining >= inv.total) {
-        await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id);
-        remaining -= inv.total;
-      } else if (remaining > 0) {
-        await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id);
-        remaining = 0;
-      }
-    }
-
+    await refreshInvoices();
     setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
     setShowAdd(false);
-    const { data } = await supabase.from("client_payments").select("*").eq("client_id", selected).order("date", { ascending: false });
-    setPayments(data || []);
-    onRefresh(); // Refresh invoices list too
+    await reloadPayments();
     setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editPayment) return;
+    setSaving(true);
+    await supabase.from("client_payments").update({ date: editPayment.date, amount: +editPayment.amount, type: editPayment.type, notes: editPayment.notes }).eq("id", editPayment.id);
+    await refreshInvoices();
+    setEditPayment(null);
+    await reloadPayments();
+    setSaving(false);
+  };
+
+  const delPayment = async (id) => {
+    if (!window.confirm("Delete this payment record?")) return;
+    await supabase.from("client_payments").delete().eq("id", id);
+    await refreshInvoices();
+    await reloadPayments();
+  };
+
+  const printClientPayment = (p, clientName) => {
+    const html = `<!DOCTYPE html><html><head><title>Payment Record</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; max-width: 400px; margin: 0 auto; }
+      h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+      .box { border: 2px solid #000; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      .row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 700; }
+      .amount { font-size: 22px; font-weight: 800; color: #006600; text-align: center; padding: 16px; border: 2px solid #006600; border-radius: 8px; margin: 16px 0; }
+      .footer { text-align: center; font-size: 11px; color: #999; margin-top: 20px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="subtitle">${p.type === "payment" ? "RECEIPT VOUCHER" : "CHARGE VOUCHER"}</div>
+      <div class="amount">$${Number(p.amount).toFixed(2)}</div>
+      <div class="box">
+        <div class="row"><span class="label">Date</span><span class="value">${p.date}</span></div>
+        <div class="row"><span class="label">Client</span><span class="value">${clientName}</span></div>
+        <div class="row"><span class="label">Type</span><span class="value">${p.type === "payment" ? "Payment Received" : "Additional Charge"}</span></div>
+        ${p.notes ? `<div class="row"><span class="label">Notes</span><span class="value">${p.notes}</span></div>` : ""}
+      </div>
+      <div class="footer">Thank you! • ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=500,height=650");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const printClientLedger = () => {
+    const clientName = clients.find(c => c.id === selected)?.name || "";
+    const ledgerRows = [
+      ...clientInvoices.map(inv => ({ date: inv.date, desc: `Invoice ${inv.id}`, debit: inv.total, credit: 0 })),
+      ...payments.filter(p => {
+        if (fromDate && p.date < fromDate) return false;
+        if (toDate && p.date > toDate) return false;
+        return true;
+      }).map(p => ({ date: p.date, desc: p.type === "payment" ? "Payment Received" : "Additional Charge", notes: p.notes || "", debit: p.type === "charge" ? +p.amount : 0, credit: p.type === "payment" ? +p.amount : 0 })),
+    ].sort((a, b) => a.date.localeCompare(b.date));
+    let running = 0;
+    const rows = ledgerRows.map(r => {
+      running += r.debit - r.credit;
+      return `<tr><td>${r.date}</td><td>${r.desc}</td><td>${r.notes||"—"}</td><td style="color:#cc0000">${r.debit > 0 ? "$"+r.debit.toFixed(2) : "—"}</td><td style="color:#006600">${r.credit > 0 ? "$"+r.credit.toFixed(2) : "—"}</td><td style="font-weight:800;color:${running>0?"#cc0000":"#006600"}">${"$"+Math.abs(running).toFixed(2)+" "+(running>0?"DR":"CR")}</td></tr>`;
+    }).join("");
+    const period = fromDate || toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+    const html = `<!DOCTYPE html><html><head><title>Ledger - ${clientName}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; padding: 30px; font-size: 12px; }
+      h1 { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+      h2 { font-size: 14px; color: #666; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #000; color: #fff; padding: 8px; text-align: left; }
+      td { padding: 7px 8px; border-bottom: 1px solid #eee; }
+      tr:nth-child(even) { background: #f9f9f9; }
+      .footer { margin-top: 20px; text-align: center; font-size: 10px; color: #999; }
+    </style></head><body>
+      <h1>⚡ ElectroPro — Client Ledger</h1>
+      <h2>${clientName}${period}</h2>
+      <table><thead><tr><th>Date</th><th>Description</th><th>Notes</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro Business Manager</div>
+      <script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    w.document.write(html);
+    w.document.close();
   };
 
   return (
@@ -2639,9 +2734,16 @@ function ClientBalance({ clients, invoices, onRefresh }) {
             <StatCard label="Balance Due" value={fmt(balance)} icon="💳" color={balance>0?T.red:T.green} sub={balance>0?"Outstanding":"Fully paid"} />
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700 }}>Payment History</h3>
-            <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+            <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1 }}>📅 From:</span>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width: "auto" }} />
+            <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1 }}>To:</span>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width: "auto" }} />
+            <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 11, cursor: "pointer" }}>Clear</button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button onClick={printClientLedger} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 8, padding: "6px 14px", color: T.green, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🖨️ Print Ledger</button>
+              <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
+            </div>
           </div>
 
           {showAdd && (
@@ -2664,19 +2766,69 @@ function ClientBalance({ clients, invoices, onRefresh }) {
             </div>
           )}
 
+          {editPayment && (
+            <div style={{ background: T.card, border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 20, marginBottom: 16 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: T.yellow }}>✏️ Edit Payment</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DATE</div><input type="date" value={editPayment.date} onChange={e => setEditPayment({...editPayment,date:e.target.value})} /></div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>TYPE</div>
+                  <select value={editPayment.type} onChange={e => setEditPayment({...editPayment,type:e.target.value})}>
+                    <option value="payment">Payment Received</option>
+                    <option value="charge">Additional Charge</option>
+                  </select>
+                </div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>AMOUNT ($)</div><input type="number" value={editPayment.amount} onChange={e => setEditPayment({...editPayment,amount:e.target.value})} /></div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>NOTES</div><input value={editPayment.notes||""} onChange={e => setEditPayment({...editPayment,notes:e.target.value})} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                <Btn small onClick={saveEdit} loading={saving}>Save Changes</Btn>
+                <Btn small outline onClick={() => setEditPayment(null)}>Cancel</Btn>
+              </div>
+            </div>
+          )}
+
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
             <table>
-              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th>Amount</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Date</th><th>Description</th><th>Notes</th>
+                  <th style={{ color: T.red }}>Debit (Charged)</th>
+                  <th style={{ color: T.green }}>Credit (Paid)</th>
+                  <th style={{ color: T.accent }}>Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody>
-                {payments.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ fontFamily: T.mono, fontSize: 12 }}>{p.date}</td>
-                    <td><Badge color={p.type==="payment"?T.green:T.red}>{p.type==="payment"?"PAYMENT":"CHARGE"}</Badge></td>
-                    <td style={{ fontSize: 12, color: T.muted }}>{p.notes || "—"}</td>
-                    <td style={{ fontFamily: T.mono, color: p.type==="payment"?T.green:T.red, fontWeight: 700 }}>{p.type==="payment"?"+":"-"}{fmt(p.amount)}</td>
-                  </tr>
-                ))}
-                {payments.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No payment records yet</td></tr>}
+                {(() => {
+                  // Build combined ledger: invoices as debits, payments as credits
+                  const ledgerRows = [
+                    ...clientInvoices.map(inv => ({ date: inv.date, desc: `Invoice ${inv.id}`, notes: "", debit: inv.total, credit: 0, id: inv.id, isInv: true })),
+                    ...payments.map(p => ({ date: p.date, desc: p.type === "payment" ? "Payment Received" : "Additional Charge", notes: p.notes || "", debit: p.type === "charge" ? +p.amount : 0, credit: p.type === "payment" ? +p.amount : 0, id: p.id, isInv: false, raw: p })),
+                  ].sort((a, b) => a.date.localeCompare(b.date));
+                  let runningBalance = 0;
+                  return ledgerRows.map((row, i) => {
+                    runningBalance += row.debit - row.credit;
+                    return (
+                      <tr key={i} style={{ background: row.isInv ? T.surface+"88" : "transparent" }}>
+                        <td style={{ fontFamily: T.mono, fontSize: 12 }}>{row.date}</td>
+                        <td style={{ fontSize: 12, fontWeight: row.isInv ? 700 : 400, color: row.isInv ? T.accent : T.text }}>{row.desc}</td>
+                        <td style={{ fontSize: 12, color: T.muted }}>{row.notes || "—"}</td>
+                        <td style={{ fontFamily: T.mono, color: T.red, fontWeight: 700 }}>{row.debit > 0 ? fmt(row.debit) : "—"}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green, fontWeight: 700 }}>{row.credit > 0 ? fmt(row.credit) : "—"}</td>
+                        <td style={{ fontFamily: T.mono, fontWeight: 800, color: runningBalance > 0 ? T.red : T.green }}>{fmt(Math.abs(runningBalance))}{runningBalance > 0 ? " DR" : " CR"}</td>
+                        <td>
+                          {!row.isInv && (
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => setEditPayment(row.raw)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                              <button onClick={() => delPayment(row.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
+                {payments.length === 0 && clientInvoices.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No records yet</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2684,17 +2836,35 @@ function ClientBalance({ clients, invoices, onRefresh }) {
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: T.accent, textTransform: "uppercase", letterSpacing: 1 }}>Invoice History</h3>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
             <table>
-              <thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Status</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Paid</th><th>Remaining</th><th>Status</th></tr></thead>
               <tbody>
-                {clientInvoices.map(inv => (
-                  <tr key={inv.id}>
-                    <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
-                    <td style={{ fontSize: 12 }}>{inv.date}</td>
-                    <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
-                    <td><Badge color={T.green}>PAID</Badge></td>
-                  </tr>
-                ))}
-                {clientInvoices.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No invoices for this client</td></tr>}
+                {(() => {
+                  const allInvsSorted = [...clientInvoices].sort((a,b) => a.date.localeCompare(b.date));
+                  let rem = totalPaid;
+                  const paidMap = {};
+                  for (const inv of allInvsSorted) {
+                    if (rem >= inv.total) { paidMap[inv.id] = inv.total; rem -= inv.total; }
+                    else if (rem > 0) { paidMap[inv.id] = rem; rem = 0; }
+                    else { paidMap[inv.id] = 0; }
+                  }
+                  return clientInvoices.map(inv => {
+                    const paid = paidMap[inv.id] || 0;
+                    const remaining = inv.total - paid;
+                    const statusColor = paid >= inv.total ? T.green : paid > 0 ? T.yellow : T.red;
+                    const statusLabel = paid >= inv.total ? "PAID" : paid > 0 ? "PARTIAL" : "PENDING";
+                    return (
+                      <tr key={inv.id}>
+                        <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
+                        <td style={{ fontSize: 12 }}>{inv.date}</td>
+                        <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(paid)}</td>
+                        <td style={{ fontFamily: T.mono, color: remaining > 0 ? T.red : T.green }}>{fmt(remaining)}</td>
+                        <td><Badge color={statusColor}>{statusLabel}</Badge></td>
+                      </tr>
+                    );
+                  });
+                })()}
+                {clientInvoices.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No invoices for this client</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2712,7 +2882,38 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
   const [payments, setPayments] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
+  const [syncing, setSyncing] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "", payment_method: "cash_usd" });
+
+  const reloadPayments = async () => {
+    const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: false });
+    setPayments(data || []);
+  };
+
+  const syncPayments = async () => {
+    if (!selected) return;
+    setSyncing(true);
+    // Get all payments from payments table for this supplier
+    const { data: paymentsData } = await supabase.from("payments").select("*").eq("supplier_id", selected);
+    // Get all existing supplier_payments for this supplier
+    const { data: existingData } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected);
+    const existing = existingData || [];
+    // Find payments not yet in supplier_payments (match by date + amount)
+    for (const p of (paymentsData || [])) {
+      const alreadyExists = existing.some(e => e.type === "payment" && +e.amount === +p.amount && e.date === p.date);
+      if (!alreadyExists) {
+        await supabase.from("supplier_payments").insert({
+          supplier_id: selected, date: p.date, amount: +p.amount,
+          type: "payment", notes: p.notes || null, payment_method: p.payment_method || null,
+        });
+      }
+    }
+    await reloadPayments();
+    await refreshInvoices();
+    setSyncing(false);
+    alert("✅ Payments synced!");
+  };
 
   useEffect(() => {
     if (selected) {
@@ -2720,39 +2921,149 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
     }
   }, [selected]);
 
-  const supplierInvoices = invoices.filter(i => i.type==="buy" && i.supplier_id === selected);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const supplierInvoices = invoices.filter(i => {
+    if (i.type !== "buy" || i.supplier_id !== selected) return false;
+    if (fromDate && i.date < fromDate) return false;
+    if (toDate && i.date > toDate) return false;
+    return true;
+  });
   const totalOwed = supplierInvoices.reduce((s,i)=>s+i.total,0);
   const totalPaid = payments.filter(p=>p.type==="payment").reduce((s,p)=>s+(+p.amount),0);
-  const balance = totalOwed - totalPaid;
+  const totalCharges = payments.filter(p=>p.type==="charge").reduce((s,p)=>s+(+p.amount),0);
+  const balance = totalOwed + totalCharges - totalPaid;
+
+  const refreshInvoices = async () => {
+    const { data: allPayments } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected);
+    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
+    const allInvoices = invoices.filter(i => i.type==="buy" && i.supplier_id === selected);
+    for (const inv of allInvoices) {
+      await supabase.from("invoices").update({ payment_status: "pending", status: "pending", amount_paid: 0 }).eq("id", inv.id);
+    }
+    let remaining = newTotalPaid;
+    for (const inv of allInvoices) {
+      if (remaining >= inv.total) { await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id); remaining -= inv.total; }
+      else if (remaining > 0) { await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id); remaining = 0; }
+    }
+    onRefresh();
+  };
 
   const save = async () => {
     if (!form.amount || !selected) return;
     setSaving(true);
     await supabase.from("supplier_payments").insert({ supplier_id: selected, date: form.date, amount: +form.amount, type: form.type, notes: form.notes });
+    // Also insert into payments table if it's a payment (not a charge)
+    if (form.type === "payment") {
+      const payId = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
+      await supabase.from("payments").insert({
+        id: payId, supplier_id: selected, date: form.date,
+        amount: +form.amount, payment_method: form.payment_method || "cash_usd", notes: form.notes || null,
+      });
+    }
+    await refreshInvoices();
+    setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "", payment_method: "cash_usd" });
+    setShowAdd(false);
+    await reloadPayments();
+    setSaving(false);
+  };
 
-    // Recalculate total paid after this payment
-    const { data: allPayments } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected);
-    const newTotalPaid = (allPayments || []).filter(p => p.type === "payment").reduce((s, p) => s + (+p.amount), 0);
+  const saveEdit = async () => {
+    if (!editPayment) return;
+    setSaving(true);
+    await supabase.from("supplier_payments").update({ date: editPayment.date, amount: +editPayment.amount, type: editPayment.type, notes: editPayment.notes }).eq("id", editPayment.id);
+    await refreshInvoices();
+    setEditPayment(null);
+    await reloadPayments();
+    setSaving(false);
+  };
 
-    // Auto-update pending/partial invoices for this supplier
-    const pendingInvoices = supplierInvoices.filter(i => i.payment_status !== "paid");
-    let remaining = newTotalPaid;
-    for (const inv of pendingInvoices) {
-      if (remaining >= inv.total) {
-        await supabase.from("invoices").update({ payment_status: "paid", status: "paid", amount_paid: inv.total }).eq("id", inv.id);
-        remaining -= inv.total;
-      } else if (remaining > 0) {
-        await supabase.from("invoices").update({ payment_status: "partial", status: "partial", amount_paid: remaining }).eq("id", inv.id);
-        remaining = 0;
+  const delPayment = async (id) => {
+    if (!window.confirm("Delete this payment record?")) return;
+    // Get details before deleting for cross-table sync
+    const sp = payments.find(p => p.id === id);
+    await supabase.from("supplier_payments").delete().eq("id", id);
+    // Also delete matching record from payments table
+    if (sp && sp.type === "payment") {
+      const { data: pRows } = await supabase.from("payments")
+        .select("id").eq("supplier_id", selected)
+        .eq("amount", sp.amount).eq("date", sp.date).limit(1);
+      if (pRows && pRows.length > 0) {
+        await supabase.from("payments").delete().eq("id", pRows[0].id);
       }
     }
+    await refreshInvoices();
+    await reloadPayments();
+  };
 
-    setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
-    setShowAdd(false);
-    const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: false });
-    setPayments(data || []);
-    onRefresh(); // Refresh invoices list too
-    setSaving(false);
+  const printSupplierPayment = (p, supplierName) => {
+    const html = `<!DOCTYPE html><html><head><title>Payment Voucher</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; max-width: 400px; margin: 0 auto; }
+      h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+      .box { border: 2px solid #000; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      .row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 700; }
+      .amount { font-size: 22px; font-weight: 800; color: #cc0000; text-align: center; padding: 16px; border: 2px solid #cc0000; border-radius: 8px; margin: 16px 0; }
+      .footer { text-align: center; font-size: 11px; color: #999; margin-top: 20px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="subtitle">${p.type === "payment" ? "PAYMENT VOUCHER" : "CHARGE VOUCHER"}</div>
+      <div class="amount">$${Number(p.amount).toFixed(2)}</div>
+      <div class="box">
+        <div class="row"><span class="label">Date</span><span class="value">${p.date}</span></div>
+        <div class="row"><span class="label">Supplier</span><span class="value">${supplierName}</span></div>
+        <div class="row"><span class="label">Type</span><span class="value">${p.type === "payment" ? "Payment Made" : "Additional Charge"}</span></div>
+        ${p.notes ? `<div class="row"><span class="label">Notes</span><span class="value">${p.notes}</span></div>` : ""}
+      </div>
+      <div class="footer">ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=500,height=650");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const printSupplierLedger = () => {
+    const supplierName = suppliers.find(s => s.id === selected)?.name || "";
+    const ledgerRows = [
+      ...supplierInvoices.map(inv => ({ date: inv.date, desc: `Invoice ${inv.id}`, notes: "", debit: inv.total, credit: 0 })),
+      ...payments.filter(p => {
+        if (fromDate && p.date < fromDate) return false;
+        if (toDate && p.date > toDate) return false;
+        return true;
+      }).map(p => ({ date: p.date, desc: p.type === "payment" ? "Payment Made" : "Additional Charge", notes: p.notes || "", debit: p.type === "charge" ? +p.amount : 0, credit: p.type === "payment" ? +p.amount : 0 })),
+    ].sort((a, b) => a.date.localeCompare(b.date));
+    let running = 0;
+    const rows = ledgerRows.map(r => {
+      running += r.debit - r.credit;
+      return `<tr><td>${r.date}</td><td>${r.desc}</td><td>${r.notes||"—"}</td><td style="color:#cc0000">${r.debit > 0 ? "$"+r.debit.toFixed(2) : "—"}</td><td style="color:#006600">${r.credit > 0 ? "$"+r.credit.toFixed(2) : "—"}</td><td style="font-weight:800;color:${running>0?"#cc0000":"#006600"}">${"$"+Math.abs(running).toFixed(2)+" "+(running>0?"DR":"CR")}</td></tr>`;
+    }).join("");
+    const period = fromDate || toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+    const html = `<!DOCTYPE html><html><head><title>Ledger - ${supplierName}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; padding: 30px; font-size: 12px; }
+      h1 { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+      h2 { font-size: 14px; color: #666; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #000; color: #fff; padding: 8px; text-align: left; }
+      td { padding: 7px 8px; border-bottom: 1px solid #eee; }
+      tr:nth-child(even) { background: #f9f9f9; }
+      .footer { margin-top: 20px; text-align: center; font-size: 10px; color: #999; }
+    </style></head><body>
+      <h1>⚡ ElectroPro — Supplier Ledger</h1>
+      <h2>${supplierName}${period}</h2>
+      <table><thead><tr><th>Date</th><th>Description</th><th>Notes</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro Business Manager</div>
+      <script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    w.document.write(html);
+    w.document.close();
   };
 
   return (
@@ -2774,9 +3085,17 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
             <StatCard label="Balance Owed" value={fmt(balance)} icon="💳" color={balance>0?T.red:T.green} sub={balance>0?"You owe this":"All paid"} />
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700 }}>Payment History</h3>
-            <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+            <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1 }}>📅 From:</span>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width: "auto" }} />
+            <span style={{ fontSize: 11, color: T.muted, textTransform: "uppercase", letterSpacing: 1 }}>To:</span>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width: "auto" }} />
+            <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 11, cursor: "pointer" }}>Clear</button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button onClick={syncPayments} disabled={syncing} style={{ background: T.yellow+"22", border: `1px solid ${T.yellow}44`, borderRadius: 8, padding: "6px 14px", color: T.yellow, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{syncing ? "⏳ Syncing..." : "🔄 Sync Payments"}</button>
+              <button onClick={printSupplierLedger} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 8, padding: "6px 14px", color: T.green, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🖨️ Print Ledger</button>
+              <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
+            </div>
           </div>
 
           {showAdd && (
@@ -2790,6 +3109,15 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
                   </select>
                 </div>
                 <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>AMOUNT ($)</div><input type="number" value={form.amount} onChange={e => setForm({...form,amount:e.target.value})} placeholder="0.00" /></div>
+                {form.type === "payment" && (
+                  <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PAYMENT METHOD</div>
+                    <select value={form.payment_method} onChange={e => setForm({...form,payment_method:e.target.value})}>
+                      <option value="cash_usd">💵 Cash USD</option>
+                      <option value="wallet_usdt">💎 Wallet USDT</option>
+                      <option value="bank_transfer">🏦 Bank Transfer</option>
+                    </select>
+                  </div>
+                )}
                 <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>NOTES</div><input value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} placeholder="Optional" /></div>
               </div>
               <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
@@ -2799,19 +3127,68 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
             </div>
           )}
 
+          {editPayment && (
+            <div style={{ background: T.card, border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 20, marginBottom: 16 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: T.yellow }}>✏️ Edit Payment</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DATE</div><input type="date" value={editPayment.date} onChange={e => setEditPayment({...editPayment,date:e.target.value})} /></div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>TYPE</div>
+                  <select value={editPayment.type} onChange={e => setEditPayment({...editPayment,type:e.target.value})}>
+                    <option value="payment">Payment Made</option>
+                    <option value="charge">Additional Charge</option>
+                  </select>
+                </div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>AMOUNT ($)</div><input type="number" value={editPayment.amount} onChange={e => setEditPayment({...editPayment,amount:e.target.value})} /></div>
+                <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>NOTES</div><input value={editPayment.notes||""} onChange={e => setEditPayment({...editPayment,notes:e.target.value})} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                <Btn small onClick={saveEdit} loading={saving}>Save Changes</Btn>
+                <Btn small outline onClick={() => setEditPayment(null)}>Cancel</Btn>
+              </div>
+            </div>
+          )}
+
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
             <table>
-              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th>Amount</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Date</th><th>Description</th><th>Notes</th>
+                  <th style={{ color: T.red }}>Debit (Owed)</th>
+                  <th style={{ color: T.green }}>Credit (Paid)</th>
+                  <th style={{ color: T.accent }}>Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody>
-                {payments.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ fontFamily: T.mono, fontSize: 12 }}>{p.date}</td>
-                    <td><Badge color={p.type==="payment"?T.green:T.red}>{p.type==="payment"?"PAID":"CHARGE"}</Badge></td>
-                    <td style={{ fontSize: 12, color: T.muted }}>{p.notes || "—"}</td>
-                    <td style={{ fontFamily: T.mono, color: p.type==="payment"?T.green:T.red, fontWeight: 700 }}>{fmt(p.amount)}</td>
-                  </tr>
-                ))}
-                {payments.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No payment records yet</td></tr>}
+                {(() => {
+                  const ledgerRows = [
+                    ...supplierInvoices.map(inv => ({ date: inv.date, desc: `Invoice ${inv.id}`, notes: "", debit: inv.total, credit: 0, id: inv.id, isInv: true })),
+                    ...payments.map(p => ({ date: p.date, desc: p.type === "payment" ? "Payment Made" : "Additional Charge", notes: p.notes || "", debit: p.type === "charge" ? +p.amount : 0, credit: p.type === "payment" ? +p.amount : 0, id: p.id, isInv: false, raw: p })),
+                  ].sort((a, b) => a.date.localeCompare(b.date));
+                  let runningBalance = 0;
+                  return ledgerRows.map((row, i) => {
+                    runningBalance += row.debit - row.credit;
+                    return (
+                      <tr key={i} style={{ background: row.isInv ? T.surface+"88" : "transparent" }}>
+                        <td style={{ fontFamily: T.mono, fontSize: 12 }}>{row.date}</td>
+                        <td style={{ fontSize: 12, fontWeight: row.isInv ? 700 : 400, color: row.isInv ? T.accent : T.text }}>{row.desc}</td>
+                        <td style={{ fontSize: 12, color: T.muted }}>{row.notes || "—"}</td>
+                        <td style={{ fontFamily: T.mono, color: T.red, fontWeight: 700 }}>{row.debit > 0 ? fmt(row.debit) : "—"}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green, fontWeight: 700 }}>{row.credit > 0 ? fmt(row.credit) : "—"}</td>
+                        <td style={{ fontFamily: T.mono, fontWeight: 800, color: runningBalance > 0 ? T.red : T.green }}>{fmt(Math.abs(runningBalance))}{runningBalance > 0 ? " DR" : " CR"}</td>
+                        <td>
+                          {!row.isInv && (
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => setEditPayment(row.raw)} style={{ background: T.accent+"22", border: `1px solid ${T.accent}44`, borderRadius: 6, padding: "4px 8px", color: T.accent, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                              <button onClick={() => delPayment(row.id)} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 6, padding: "4px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>🗑️</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
+                {payments.length === 0 && supplierInvoices.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No records yet</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2819,16 +3196,36 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: T.accent, textTransform: "uppercase", letterSpacing: 1 }}>Purchase History</h3>
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
             <table>
-              <thead><tr><th>Invoice</th><th>Date</th><th>Total</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Paid</th><th>Remaining</th><th>Status</th></tr></thead>
               <tbody>
-                {supplierInvoices.map(inv => (
-                  <tr key={inv.id}>
-                    <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
-                    <td style={{ fontSize: 12 }}>{inv.date}</td>
-                    <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
-                  </tr>
-                ))}
-                {supplierInvoices.length === 0 && <tr><td colSpan={3} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No purchases for this supplier</td></tr>}
+                {(() => {
+                  // Calculate paid per invoice from payments pool (same logic as refreshInvoices)
+                  const allInvsSorted = [...supplierInvoices].sort((a,b) => a.date.localeCompare(b.date));
+                  let rem = totalPaid;
+                  const paidMap = {};
+                  for (const inv of allInvsSorted) {
+                    if (rem >= inv.total) { paidMap[inv.id] = inv.total; rem -= inv.total; }
+                    else if (rem > 0) { paidMap[inv.id] = rem; rem = 0; }
+                    else { paidMap[inv.id] = 0; }
+                  }
+                  return supplierInvoices.map(inv => {
+                    const paid = paidMap[inv.id] || 0;
+                    const remaining = inv.total - paid;
+                    const statusColor = paid >= inv.total ? T.green : paid > 0 ? T.yellow : T.red;
+                    const statusLabel = paid >= inv.total ? "PAID" : paid > 0 ? "PARTIAL" : "PENDING";
+                    return (
+                      <tr key={inv.id}>
+                        <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
+                        <td style={{ fontSize: 12 }}>{inv.date}</td>
+                        <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
+                        <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(paid)}</td>
+                        <td style={{ fontFamily: T.mono, color: remaining > 0 ? T.red : T.green }}>{fmt(remaining)}</td>
+                        <td><Badge color={statusColor}>{statusLabel}</Badge></td>
+                      </tr>
+                    );
+                  });
+                })()}
+                {supplierInvoices.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: T.muted, padding: 24 }}>No purchases for this supplier</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2853,6 +3250,8 @@ function ReceiptsPage({ clients }) {
   const [editReceipt, setEditReceipt] = useState(null);
   const [filterClient, setFilterClient] = useState("");
   const [filterMethod, setFilterMethod] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [form, setForm] = useState({ client_id: "", date: new Date().toISOString().slice(0,10), amount: "", payment_method: "cash_usd", reference: "", notes: "" });
 
   const load = async () => {
@@ -2901,10 +3300,47 @@ function ReceiptsPage({ clients }) {
     load();
   };
 
-  const filtered = receipts.filter(r =>
-    (!filterClient || r.client_id === +filterClient) &&
-    (!filterMethod || r.payment_method === filterMethod)
-  );
+  const printReceipt = (r) => {
+    const html = `<!DOCTYPE html><html><head><title>Receipt ${r.id}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; max-width: 400px; margin: 0 auto; }
+      h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+      .box { border: 2px solid #000; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      .row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 700; }
+      .amount { font-size: 22px; font-weight: 800; color: #006600; text-align: center; padding: 16px; border: 2px solid #006600; border-radius: 8px; margin: 16px 0; }
+      .footer { text-align: center; font-size: 11px; color: #999; margin-top: 20px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="subtitle">RECEIPT VOUCHER</div>
+      <div class="amount">$${Number(r.amount).toFixed(2)}</div>
+      <div class="box">
+        <div class="row"><span class="label">Receipt ID</span><span class="value">${r.id}</span></div>
+        <div class="row"><span class="label">Date</span><span class="value">${r.date}</span></div>
+        <div class="row"><span class="label">Client</span><span class="value">${r.clientName}</span></div>
+        <div class="row"><span class="label">Payment Method</span><span class="value">${{cash_usd:"💵 Cash USD",wallet_usdt:"💎 Wallet USDT",bank_transfer:"🏦 Bank Transfer"}[r.payment_method]||r.payment_method}</span></div>
+        ${r.reference ? `<div class="row"><span class="label">Reference #</span><span class="value">${r.reference}</span></div>` : ""}
+        ${r.notes ? `<div class="row"><span class="label">Notes</span><span class="value">${r.notes}</span></div>` : ""}
+      </div>
+      <div class="footer">Thank you for your payment! • ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=500,height=700");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const filtered = receipts.filter(r => {
+    if (fromDate && r.date < fromDate) return false;
+    if (toDate && r.date > toDate) return false;
+    if (filterClient && r.client_id !== +filterClient) return false;
+    if (filterMethod && r.payment_method !== filterMethod) return false;
+    return true;
+  });
   const total = filtered.reduce((s,r) => s + +r.amount, 0);
   const byCash = filtered.filter(r=>r.payment_method==="cash_usd").reduce((s,r)=>s+(+r.amount),0);
   const byUsdt = filtered.filter(r=>r.payment_method==="wallet_usdt").reduce((s,r)=>s+(+r.amount),0);
@@ -2942,6 +3378,20 @@ function ReceiptsPage({ clients }) {
           <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Money received from clients</p>
         </div>
         <Btn onClick={() => setShowAdd(!showAdd)}>+ New Receipt</Btn>
+      </div>
+      <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 14px", marginBottom:16 }}>
+        <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>📅 From:</span>
+        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width:"auto" }} />
+        <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>To:</span>
+        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width:"auto" }} />
+        <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background:"transparent", border:`1px solid ${T.border}`, borderRadius:6, padding:"4px 10px", color:T.muted, fontSize:11, cursor:"pointer" }}>Clear</button>
+        <button onClick={() => {
+          let running = 0;
+          const rows = filtered.map(r => { running += +r.amount; return `<tr><td>${r.date}</td><td>${r.clientName}</td><td>${r.notes||"—"}</td><td>${r.reference||"—"}</td><td>${{cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[r.payment_method]||""}</td><td style="color:#006600;font-weight:700">$${Number(r.amount).toFixed(2)}</td><td style="font-weight:800">$${running.toFixed(2)}</td></tr>`; }).join("");
+          const period = fromDate||toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+          const html = `<!DOCTYPE html><html><head><title>Receipts Ledger</title><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;padding:30px;font-size:12px;}h1{font-size:18px;font-weight:800;margin-bottom:4px;}h2{font-size:14px;color:#666;margin-bottom:20px;}table{width:100%;border-collapse:collapse;}th{background:#000;color:#fff;padding:8px;text-align:left;}td{padding:7px 8px;border-bottom:1px solid #eee;}tr:nth-child(even){background:#f9f9f9;}.footer{margin-top:20px;text-align:center;font-size:10px;color:#999;}</style></head><body><h1>⚡ ElectroPro — Receipts Ledger</h1><h2>${period}</h2><table><thead><tr><th>Date</th><th>Client</th><th>Notes</th><th>Reference</th><th>Method</th><th>Amount</th><th>Running Total</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro</div><script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script></body></html>`;
+          const w = window.open("","_blank","width=900,height=700"); w.document.write(html); w.document.close();
+        }} style={{ marginLeft:"auto", background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:8, padding:"6px 14px", color:T.green, fontSize:12, fontWeight:700, cursor:"pointer" }}>🖨️ Print Ledger</button>
       </div>
 
       {/* Summary cards */}
@@ -3012,25 +3462,39 @@ function ReceiptsPage({ clients }) {
       {loading ? <Loader /> : (
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
           <table>
-            <thead><tr><th>ID</th><th>Date</th><th>Client</th><th>Method</th><th>Reference</th><th>Amount</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Date</th><th>Client</th><th>Description</th><th>Reference</th><th>Method</th>
+                <th style={{ color: T.green }}>Credit (Received)</th>
+                <th style={{ color: T.accent }}>Running Total</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {filtered.map(r => (
-                <tr key={r.id}>
-                  <td style={{ fontFamily:T.mono, color:T.green, fontSize:11 }}>{r.id}</td>
-                  <td style={{ fontSize:12, color:T.muted }}>{r.date}</td>
-                  <td style={{ fontWeight:600 }}>{r.clientName}</td>
-                  <td><Badge color={pmColor[r.payment_method]}>{pmLabel[r.payment_method]}</Badge></td>
-                  <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{r.reference || "—"}</td>
-                  <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{fmt(r.amount)}</td>
-                  <td>
-                    <div style={{ display:"flex", gap:6 }}>
-                      <button onClick={() => setEditReceipt(r)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
-                      <button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No receipts found</td></tr>}
+              {(() => {
+                let running = 0;
+                return filtered.map(r => {
+                  running += +r.amount;
+                  return (
+                    <tr key={r.id}>
+                      <td style={{ fontFamily:T.mono, fontSize:12 }}>{r.date}</td>
+                      <td style={{ fontWeight:600 }}>{r.clientName}</td>
+                      <td style={{ fontSize:12, color:T.muted }}>{r.notes || "Payment Received"}</td>
+                      <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{r.reference || "—"}</td>
+                      <td><Badge color={pmColor[r.payment_method]}>{pmLabel[r.payment_method]}</Badge></td>
+                      <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{fmt(r.amount)}</td>
+                      <td style={{ fontFamily:T.mono, fontWeight:800, color:T.accent }}>{fmt(running)}</td>
+                      <td>
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button onClick={() => setEditReceipt(r)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                          <button onClick={() => del(r.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                });
+              })()}
+              {filtered.length===0 && <tr><td colSpan={8} style={{ textAlign:"center", color:T.muted, padding:32 }}>No receipts found</td></tr>}
             </tbody>
           </table>
         </div>
@@ -3085,21 +3549,77 @@ function PaymentsPage({ suppliers }) {
     if (!editPayment) return;
     setSaving(true);
     await supabase.from("payments").update({ date: editPayment.date, amount: +editPayment.amount, payment_method: editPayment.payment_method, reference: editPayment.reference, notes: editPayment.notes }).eq("id", editPayment.id);
+    // Also update supplier_payments if exists
+    const { data: spRows } = await supabase.from("supplier_payments").select("id").eq("supplier_id", editPayment.supplier_id).eq("type", "payment").eq("amount", editPayment.amount).limit(1);
+    if (spRows && spRows.length > 0) {
+      await supabase.from("supplier_payments").update({ date: editPayment.date, amount: +editPayment.amount, payment_method: editPayment.payment_method, notes: editPayment.notes }).eq("id", spRows[0].id);
+    }
     setEditPayment(null);
     load();
     setSaving(false);
   };
 
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
   const del = async (id) => {
     if (!window.confirm("Delete this payment?")) return;
+    // Get payment details before deleting
+    const payment = payments.find(p => p.id === id);
     await supabase.from("payments").delete().eq("id", id);
+    // Also delete matching record from supplier_payments
+    if (payment) {
+      const { data: spRows } = await supabase.from("supplier_payments")
+        .select("id").eq("supplier_id", payment.supplier_id)
+        .eq("type", "payment").eq("amount", payment.amount).eq("date", payment.date).limit(1);
+      if (spRows && spRows.length > 0) {
+        await supabase.from("supplier_payments").delete().eq("id", spRows[0].id);
+      }
+    }
     load();
   };
 
-  const filtered = payments.filter(p =>
-    (!filterSupplier || p.supplier_id === +filterSupplier) &&
-    (!filterMethod || p.payment_method === filterMethod)
-  );
+  const printPayment = (p) => {
+    const html = `<!DOCTYPE html><html><head><title>Payment ${p.id}</title><style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #000; background: white; padding: 40px; max-width: 400px; margin: 0 auto; }
+      h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+      .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+      .box { border: 2px solid #000; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+      .row:last-child { border-bottom: none; }
+      .label { color: #666; }
+      .value { font-weight: 700; }
+      .amount { font-size: 22px; font-weight: 800; color: #cc0000; text-align: center; padding: 16px; border: 2px solid #cc0000; border-radius: 8px; margin: 16px 0; }
+      .footer { text-align: center; font-size: 11px; color: #999; margin-top: 20px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>⚡ ElectroPro</h1>
+      <div class="subtitle">PAYMENT VOUCHER</div>
+      <div class="amount">$${Number(p.amount).toFixed(2)}</div>
+      <div class="box">
+        <div class="row"><span class="label">Payment ID</span><span class="value">${p.id}</span></div>
+        <div class="row"><span class="label">Date</span><span class="value">${p.date}</span></div>
+        <div class="row"><span class="label">Supplier</span><span class="value">${p.supplierName}</span></div>
+        <div class="row"><span class="label">Payment Method</span><span class="value">${{cash_usd:"💵 Cash USD",wallet_usdt:"💎 Wallet USDT",bank_transfer:"🏦 Bank Transfer"}[p.payment_method]||p.payment_method}</span></div>
+        ${p.reference ? `<div class="row"><span class="label">Reference #</span><span class="value">${p.reference}</span></div>` : ""}
+        ${p.notes ? `<div class="row"><span class="label">Notes</span><span class="value">${p.notes}</span></div>` : ""}
+      </div>
+      <div class="footer">ElectroPro Business Manager</div>
+      <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=500,height=700");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const filtered = payments.filter(p => {
+    if (fromDate && p.date < fromDate) return false;
+    if (toDate && p.date > toDate) return false;
+    if (filterSupplier && p.supplier_id !== +filterSupplier) return false;
+    if (filterMethod && p.payment_method !== filterMethod) return false;
+    return true;
+  });
   const total = filtered.reduce((s,p) => s + +p.amount, 0);
   const byCash = filtered.filter(p=>p.payment_method==="cash_usd").reduce((s,p)=>s+(+p.amount),0);
   const byUsdt = filtered.filter(p=>p.payment_method==="wallet_usdt").reduce((s,p)=>s+(+p.amount),0);
@@ -3131,12 +3651,26 @@ function PaymentsPage({ suppliers }) {
           </div>
         </div>
       )}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24, flexWrap:"wrap", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:12 }}>
         <div>
           <h2 style={{ fontSize:28, fontWeight:800 }}>Payments</h2>
           <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Money paid to suppliers</p>
         </div>
         <Btn onClick={() => setShowAdd(!showAdd)}>+ New Payment</Btn>
+      </div>
+      <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 14px", marginBottom:16 }}>
+        <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>📅 From:</span>
+        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width:"auto" }} />
+        <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>To:</span>
+        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width:"auto" }} />
+        <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background:"transparent", border:`1px solid ${T.border}`, borderRadius:6, padding:"4px 10px", color:T.muted, fontSize:11, cursor:"pointer" }}>Clear</button>
+        <button onClick={() => {
+          let running = 0;
+          const rows = filtered.map(p => { running += +p.amount; return `<tr><td>${p.date}</td><td>${p.supplierName}</td><td>${p.notes||"—"}</td><td>${p.reference||"—"}</td><td>${{cash_usd:"Cash USD",wallet_usdt:"Wallet USDT",bank_transfer:"Bank Transfer"}[p.payment_method]||""}</td><td style="color:#cc0000;font-weight:700">$${Number(p.amount).toFixed(2)}</td><td style="font-weight:800">$${running.toFixed(2)}</td></tr>`; }).join("");
+          const period = fromDate||toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+          const html = `<!DOCTYPE html><html><head><title>Payments Ledger</title><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;padding:30px;font-size:12px;}h1{font-size:18px;font-weight:800;margin-bottom:4px;}h2{font-size:14px;color:#666;margin-bottom:20px;}table{width:100%;border-collapse:collapse;}th{background:#000;color:#fff;padding:8px;text-align:left;}td{padding:7px 8px;border-bottom:1px solid #eee;}tr:nth-child(even){background:#f9f9f9;}.footer{margin-top:20px;text-align:center;font-size:10px;color:#999;}</style></head><body><h1>⚡ ElectroPro — Payments Ledger</h1><h2>${period}</h2><table><thead><tr><th>Date</th><th>Supplier</th><th>Notes</th><th>Reference</th><th>Method</th><th>Amount</th><th>Running Total</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro</div><script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script></body></html>`;
+          const w = window.open("","_blank","width=900,height=700"); w.document.write(html); w.document.close();
+        }} style={{ marginLeft:"auto", background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:8, padding:"6px 14px", color:T.green, fontSize:12, fontWeight:700, cursor:"pointer" }}>🖨️ Print Ledger</button>
       </div>
 
       {/* Summary cards */}
@@ -3207,25 +3741,39 @@ function PaymentsPage({ suppliers }) {
       {loading ? <Loader /> : (
         <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
           <table>
-            <thead><tr><th>ID</th><th>Date</th><th>Supplier</th><th>Method</th><th>Reference</th><th>Amount</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Date</th><th>Supplier</th><th>Description</th><th>Reference</th><th>Method</th>
+                <th style={{ color: T.red }}>Debit (Paid Out)</th>
+                <th style={{ color: T.accent }}>Running Total</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {filtered.map(p => (
-                <tr key={p.id}>
-                  <td style={{ fontFamily:T.mono, color:T.red, fontSize:11 }}>{p.id}</td>
-                  <td style={{ fontSize:12, color:T.muted }}>{p.date}</td>
-                  <td style={{ fontWeight:600 }}>{p.supplierName}</td>
-                  <td><Badge color={pmColor[p.payment_method]}>{pmLabel[p.payment_method]}</Badge></td>
-                  <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{p.reference || "—"}</td>
-                  <td style={{ fontFamily:T.mono, color:T.red, fontWeight:700 }}>{fmt(p.amount)}</td>
-                  <td>
-                    <div style={{ display:"flex", gap:6 }}>
-                      <button onClick={() => setEditPayment(p)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
-                      <button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No payments found</td></tr>}
+              {(() => {
+                let running = 0;
+                return filtered.map(p => {
+                  running += +p.amount;
+                  return (
+                    <tr key={p.id}>
+                      <td style={{ fontFamily:T.mono, fontSize:12 }}>{p.date}</td>
+                      <td style={{ fontWeight:600 }}>{p.supplierName}</td>
+                      <td style={{ fontSize:12, color:T.muted }}>{p.notes || "Payment Made"}</td>
+                      <td style={{ fontFamily:T.mono, fontSize:11, color:T.muted }}>{p.reference || "—"}</td>
+                      <td><Badge color={pmColor[p.payment_method]}>{pmLabel[p.payment_method]}</Badge></td>
+                      <td style={{ fontFamily:T.mono, color:T.red, fontWeight:700 }}>{fmt(p.amount)}</td>
+                      <td style={{ fontFamily:T.mono, fontWeight:800, color:T.accent }}>{fmt(running)}</td>
+                      <td>
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button onClick={() => setEditPayment(p)} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 8px", color:T.accent, fontSize:11, cursor:"pointer" }}>✏️</button>
+                          <button onClick={() => del(p.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                });
+              })()}
+              {filtered.length===0 && <tr><td colSpan={8} style={{ textAlign:"center", color:T.muted, padding:32 }}>No payments found</td></tr>}
             </tbody>
           </table>
         </div>
@@ -3234,120 +3782,21 @@ function PaymentsPage({ suppliers }) {
   );
 }
 
-// ─── BSM PROFIT ───────────────────────────────────────────────────────────────
-function BSMProfit({ invoices, suppliers }) {
-  const [filterSupplier, setFilterSupplier] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-
-  // Only purchase invoices that have a remaining balance
-  const purchases = invoices.filter(i => {
-    if (i.type !== "buy") return false;
-    const remaining = i.total - (i.amount_paid || 0);
-    if (remaining <= 0) return false;
-    if (filterSupplier && i.supplier_id !== +filterSupplier) return false;
-    if (dateFrom && i.date < dateFrom) return false;
-    if (dateTo && i.date > dateTo) return false;
-    return true;
-  });
-
-  const totalProfit = purchases.reduce((s, i) => s + (i.total - (i.amount_paid || 0)), 0);
-  const totalPurchases = purchases.reduce((s, i) => s + i.total, 0);
-  const totalPaid = purchases.reduce((s, i) => s + (i.amount_paid || 0), 0);
-
-  const getSupplierName = (id) => suppliers.find(s => s.id === id)?.name || "—";
-
-  return (
-    <div className="page">
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, flexWrap:"wrap", gap:12 }}>
-        <div>
-          <h2 style={{ fontSize:28, fontWeight:800 }}>🏢 BSM Profit</h2>
-          <p style={{ color:T.muted, fontSize:13, marginTop:4 }}>Profit from purchase invoice remaining balances</p>
-        </div>
-      </div>
-
-      {/* Summary cards */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:16, marginBottom:24 }}>
-        <StatCard label="BSM Profit" value={fmt(totalProfit)} icon="💎" color={T.green} sub="Total remaining balances" />
-        <StatCard label="Total Purchases" value={fmt(totalPurchases)} icon="🛒" color={T.accent} sub={`${purchases.length} invoices`} />
-        <StatCard label="Total Paid" value={fmt(totalPaid)} icon="✅" color={T.yellow} sub="Paid to suppliers" />
-        <StatCard label="Profit %" value={`${totalPurchases > 0 ? ((totalProfit/totalPurchases)*100).toFixed(1) : 0}%`} icon="📊" color={T.green} sub="Of total purchases" />
-      </div>
-
-      {/* Filters */}
-      <div style={{ display:"flex", gap:12, marginBottom:20, flexWrap:"wrap" }}>
-        <select value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)} style={{ width:"auto" }}>
-          <option value="">All Suppliers</option>
-          {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <div style={{ fontSize:11, color:T.muted }}>FROM</div>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width:"auto" }} />
-        </div>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <div style={{ fontSize:11, color:T.muted }}>TO</div>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width:"auto" }} />
-        </div>
-        {(filterSupplier || dateFrom || dateTo) && (
-          <button onClick={() => { setFilterSupplier(""); setDateFrom(""); setDateTo(""); }} style={{ background:"none", border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 12px", color:T.muted, fontSize:12, cursor:"pointer" }}>✕ Clear</button>
-        )}
-      </div>
-
-      {/* Invoice table */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Invoice</th>
-              <th>Date</th>
-              <th>Supplier</th>
-              <th>Invoice Total</th>
-              <th>Paid</th>
-              <th style={{ color:T.green }}>BSM Profit</th>
-              <th>Profit %</th>
-            </tr>
-          </thead>
-          <tbody>
-            {purchases.map(inv => {
-              const remaining = inv.total - (inv.amount_paid || 0);
-              const pct = inv.total > 0 ? ((remaining / inv.total) * 100).toFixed(1) : 0;
-              return (
-                <tr key={inv.id}>
-                  <td style={{ fontFamily:T.mono, color:T.accent, fontSize:12 }}>{inv.id}</td>
-                  <td style={{ fontSize:12, color:T.muted }}>{inv.date}</td>
-                  <td style={{ fontWeight:600 }}>{inv.customer || getSupplierName(inv.supplier_id)}</td>
-                  <td style={{ fontFamily:T.mono }}>{fmt(inv.total)}</td>
-                  <td style={{ fontFamily:T.mono, color:T.yellow }}>{fmt(inv.amount_paid || 0)}</td>
-                  <td style={{ fontFamily:T.mono, fontWeight:800, color:T.green, fontSize:15 }}>{fmt(remaining)}</td>
-                  <td><span style={{ background:T.green+"22", color:T.green, borderRadius:6, padding:"3px 10px", fontFamily:T.mono, fontSize:12, fontWeight:700 }}>{pct}%</span></td>
-                </tr>
-              );
-            })}
-            {purchases.length === 0 && (
-              <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No purchase profits found</td></tr>
-            )}
-          </tbody>
-          {purchases.length > 0 && (
-            <tfoot>
-              <tr style={{ background:T.green+"11", borderTop:`2px solid ${T.green}44` }}>
-                <td colSpan={3} style={{ fontWeight:700, color:T.green, padding:"12px 16px" }}>TOTAL BSM PROFIT</td>
-                <td style={{ fontFamily:T.mono, fontWeight:700 }}>{fmt(totalPurchases)}</td>
-                <td style={{ fontFamily:T.mono, fontWeight:700, color:T.yellow }}>{fmt(totalPaid)}</td>
-                <td style={{ fontFamily:T.mono, fontWeight:800, color:T.green, fontSize:16 }}>{fmt(totalProfit)}</td>
-                <td><span style={{ background:T.green+"22", color:T.green, borderRadius:6, padding:"3px 10px", fontFamily:T.mono, fontSize:12, fontWeight:700 }}>{totalPurchases > 0 ? ((totalProfit/totalPurchases)*100).toFixed(1) : 0}%</span></td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-    </div>
-  );
-}
-
 // ─── APP SHELL ────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState("dashboard");
+  const [pageHistory, setPageHistory] = useState(["dashboard"]);
+  const page = pageHistory[pageHistory.length - 1];
   const [loading, setLoading] = useState(true);
+
+  const setPage = (newPage) => setPageHistory(prev => [...prev, newPage]);
+  const goBack = () => setPageHistory(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+
+  // ESC key → go back one page
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === "Escape" && pageHistory.length > 1) goBack(); };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [pageHistory]);
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -3416,27 +3865,14 @@ export default function App() {
       const discountAmt = inv.discount_type === "pct" ? subtotal * (inv.discount_value || 0) / 100 : (inv.discount_value || 0);
       const shipAmt = inv.shipment_type === "pct" ? subtotal * (inv.shipment_value || 0) / 100 : (inv.shipment_value || 0);
       const total = Math.max(0, subtotal - discountAmt) + shipAmt;
-      // Use stored cost (kept in sync with product cost_price via saveEdit)
-      // Fall back to current product cost if stored cost is 0 or missing
-      const cogs = (inv.invoice_items || []).reduce((s, i) => {
-        const storedCost = i.cost || 0;
-        const currentProd = (prods || []).find(p => p.id === i.product_id);
-        const costPrice = storedCost > 0 ? storedCost : (currentProd?.cost_price || 0);
-        return s + i.quantity * costPrice;
-      }, 0);
+      const cogs = (inv.invoice_items || []).reduce((s, i) => s + i.quantity * i.cost, 0);
       const profit = inv.type === "sell" ? total - cogs : 0;
-      return { ...inv, total, cogs, profit, locationName: inv.locations?.name || "", locations: undefined };
+      return { ...inv, total, cogs, profit, locationName: inv.locations?.name || "", invoice_items: undefined, locations: undefined };
     });
     const locsWithRevenue = locsData.map(l => {
-      const locAllSells = invsData.filter(i => i.location_id === l.id && i.type === "sell");
-      const locPaidSells = locAllSells.filter(i => (i.payment_status || i.status) === "paid");
-      const locPendingSells = locAllSells.filter(i => (i.payment_status || i.status) !== "paid");
-      return {
-        ...l,
-        revenue: locPaidSells.reduce((s, i) => s + i.total, 0),
-        revenuePending: locPendingSells.reduce((s, i) => s + i.total, 0),
-        revenueTotal: locAllSells.reduce((s, i) => s + i.total, 0),
-      };
+      const locSells = invsData.filter(i => i.location_id === l.id && i.type === "sell" && i.status === "paid");
+      const locPending = invsData.filter(i => i.location_id === l.id && i.type === "sell" && i.status !== "paid");
+      return { ...l, revenue: locSells.reduce((s, i) => s + i.total, 0), pendingRevenue: locPending.reduce((s, i) => s + i.total, 0) };
     });
 
     setLocations(locsWithRevenue);
@@ -3482,7 +3918,6 @@ export default function App() {
     ...(isManager ? [{ id: "pl", label: "P&L", icon: "📊" }] : []),
     { id: "reports", label: "Reports", icon: "📈" },
     { id: "locations", label: "Locations", icon: "🏢" },
-    ...(isAdmin ? [{ id: "bsm-profit", label: "BSM Profit", icon: "💎" }] : []),
     ...(isAdmin ? [{ id: "manage-locations", label: "Manage Locations", icon: "📍" }] : []),
     ...(isAdmin ? [{ id: "users", label: "Users", icon: "👥" }] : []),
   ];
@@ -3500,7 +3935,7 @@ export default function App() {
           </div>
           <div style={{ padding: "12px 8px", flex: 1 }}>
             {NAV.map(n => (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", background: page === n.id ? T.accentDim : "transparent", color: page === n.id ? T.accent : T.muted, border: "none", borderRadius: 8, fontSize: 12, fontWeight: page === n.id ? 700 : 400, textAlign: "left", marginBottom: 2, transition: "all .15s", borderLeft: page === n.id ? `2px solid ${T.accent}` : "2px solid transparent", whiteSpace: "nowrap", overflow: "hidden" }}>
+              <button key={n.id} onClick={() => setPageHistory([n.id])} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", background: page === n.id ? T.accentDim : "transparent", color: page === n.id ? T.accent : T.muted, border: "none", borderRadius: 8, fontSize: 12, fontWeight: page === n.id ? 700 : 400, textAlign: "left", marginBottom: 2, transition: "all .15s", borderLeft: page === n.id ? `2px solid ${T.accent}` : "2px solid transparent", whiteSpace: "nowrap", overflow: "hidden" }}>
                 <span style={{ flexShrink: 0 }}>{n.icon}</span>
                 <span className="nav-label" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
               </button>
@@ -3522,9 +3957,16 @@ export default function App() {
         </div>
 
         <main className="main-content" style={{ flex: 1, padding: "28px 32px", overflowY: "auto", overflowX: "auto", minWidth: 0 }}>
+          {!loading && pageHistory.length > 1 && (
+            <button onClick={goBack} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 14px", color: T.muted, fontSize: 12, cursor: "pointer", marginBottom: 16, transition: "all .15s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor=T.accent; e.currentTarget.style.color=T.accent; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor=T.border; e.currentTarget.style.color=T.muted; }}>
+              ← Back &nbsp;<span style={{ fontSize: 10, opacity: 0.5 }}>ESC</span>
+            </button>
+          )}
           {loading ? <Loader /> : (
             <>
-              {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} />}
+              {page === "dashboard" && <Dashboard invoices={invoices} products={products} locations={locations} userProfile={userProfile} setPage={setPage} />}
               {page === "inventory" && <Inventory products={products} locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "transfer" && <StockTransfer products={products} locations={locations} onRefresh={loadData} />}
               {page === "clients" && <ClientsPage clients={clients} onRefresh={loadData} />}
@@ -3537,9 +3979,9 @@ export default function App() {
               {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} clients={clients} suppliers={suppliers} onRefresh={loadData} userProfile={userProfile} />}
               {page === "expenses" && <ExpensesPage locations={locations} onRefresh={loadData} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
-              {page === "reports" && <Reports invoices={invoices} products={products} locations={locations} />}
+              {page === "reports" && <Reports invoices={invoices} products={products} locations={locations} setPage={setPage} />}
               {page === "locations" && <LocationsPage products={products} invoices={invoices} locations={locations} />}
-              {page === "bsm-profit" && <BSMProfit invoices={invoices} suppliers={suppliers} />}
+              {page === "manage-locations" && <LocationsManagement locations={locations} onRefresh={loadData} userProfile={userProfile} />}
               {page === "users" && <UsersPage currentUser={userProfile} />}
             </>
           )}
