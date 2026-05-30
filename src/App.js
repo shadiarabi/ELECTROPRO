@@ -401,7 +401,7 @@ function PrintInvoice({ inv, locations, onClose }) {
               )}
               {inv.shipment_company && (
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13, color: "#333" }}>
-                  <span>Shipping Co.</span><span style={{ fontWeight: 700 }}>{inv.shipment_company}</span>
+                  <span>🚢 Shipping Co.</span><span style={{ fontWeight: 700 }}>{inv.shipment_company}</span>
                 </div>
               )}
               {inv.shipment_payment_status && (
@@ -1127,8 +1127,14 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
               </div>
               {shipmentAmt > 0 && (
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Shipping Company Name</div>
-                  <input value={newInv.shipmentCompany} onChange={e => setNewInv({ ...newInv, shipmentCompany: e.target.value })} placeholder="e.g. DHL, FedEx, local carrier..." style={{ maxWidth: 280 }} />
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Shipping Company</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <select value={newInv.shipmentCompany} onChange={e => setNewInv({ ...newInv, shipmentCompany: e.target.value })} style={{ width: "auto", maxWidth: 280 }}>
+                      <option value="">Select or type below...</option>
+                      {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                    </select>
+                    <input value={newInv.shipmentCompany} onChange={e => setNewInv({ ...newInv, shipmentCompany: e.target.value })} placeholder="Or type custom name..." style={{ maxWidth: 200 }} />
+                  </div>
                 </div>
               )}
               {newInv.type === "buy" && shipmentAmt > 0 && (
@@ -1305,7 +1311,12 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     <td><Badge color={inv.type === "sell" ? T.green : T.yellow}>{inv.type === "sell" ? "SALE" : "BUY"}</Badge></td>
                     <td className="hide-mobile" style={{ color: T.muted, fontSize: 12 }}>{inv.date}</td>
                     <td className="hide-mobile" style={{ fontSize: 12 }}>{inv.locationName}</td>
-                    <td style={{ fontWeight: 600 }}>{inv.customer}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      <div>{inv.customer}</div>
+                      {inv.type === "buy" && inv.shipment_company && (
+                        <div style={{ fontSize: 11, color: T.accent, marginTop: 2 }}>🚢 {inv.shipment_company}</div>
+                      )}
+                    </td>
                     <td style={{ fontFamily: T.mono, fontWeight: 700 }}>{fmt(inv.total)}</td>
                     <td>
                       <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
