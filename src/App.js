@@ -1887,21 +1887,21 @@ function SuppliersPage({ suppliers, onRefresh }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editSupplier, setEditSupplier] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", email: "", contact_person: "", address: "", notes: "" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", contact_person: "", address: "", notes: "", is_shipping: false });
 
   const save = async () => {
     if (editSupplier) {
       if (!editSupplier.name) return;
       setSaving(true);
-      await supabase.from("suppliers").update({ name: editSupplier.name, phone: editSupplier.phone, email: editSupplier.email, contact_person: editSupplier.contact_person, address: editSupplier.address, notes: editSupplier.notes }).eq("id", editSupplier.id);
+      await supabase.from("suppliers").update({ name: editSupplier.name, phone: editSupplier.phone, email: editSupplier.email, contact_person: editSupplier.contact_person, address: editSupplier.address, notes: editSupplier.notes, is_shipping: editSupplier.is_shipping || false }).eq("id", editSupplier.id);
       setEditSupplier(null);
     } else {
       if (!form.name) return;
       setSaving(true);
-      await supabase.from("suppliers").insert(form);
+      await supabase.from("suppliers").insert({ ...form });
       setShowAdd(false);
     }
-    setForm({ name: "", phone: "", email: "", contact_person: "", address: "", notes: "" });
+    setForm({ name: "", phone: "", email: "", contact_person: "", address: "", notes: "", is_shipping: false });
     onRefresh();
     setSaving(false);
   };
@@ -1934,6 +1934,10 @@ function SuppliersPage({ suppliers, onRefresh }) {
                 <input value={editSupplier ? editSupplier[k] || "" : form[k]} onChange={e => editSupplier ? setEditSupplier({ ...editSupplier, [k]: e.target.value }) : setForm({ ...form, [k]: e.target.value })} placeholder={lbl} />
               </div>
             ))}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0" }}>
+              <input type="checkbox" id="isShipping" checked={editSupplier ? editSupplier.is_shipping||false : form.is_shipping} onChange={e => editSupplier ? setEditSupplier({...editSupplier, is_shipping: e.target.checked}) : setForm({...form, is_shipping: e.target.checked})} style={{ width:18, height:18, cursor:"pointer" }} />
+              <label htmlFor="isShipping" style={{ fontSize: 13, color: T.accent, fontWeight: 600, cursor:"pointer" }}>🚢 Shipping Company</label>
+            </div>
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
             <Btn onClick={save} loading={saving}>Save</Btn>
@@ -1948,7 +1952,7 @@ function SuppliersPage({ suppliers, onRefresh }) {
           <tbody>
             {suppliers.map(s => (
               <tr key={s.id}>
-                <td style={{ fontWeight: 600 }}>🏭 {s.name}</td>
+                <td style={{ fontWeight: 600 }}>{s.is_shipping ? "🚢" : "🏭"} {s.name} {s.is_shipping && <Badge color={T.accent}>SHIPPING</Badge>}</td>
                 <td style={{ fontFamily: T.mono, fontSize: 12 }}>{s.phone || "—"}</td>
                 <td className="hide-mobile" style={{ fontSize: 12 }}>{s.contact_person || "—"}</td>
                 <td className="hide-mobile" style={{ fontSize: 12, color: T.muted }}>{s.email || "—"}</td>
@@ -3768,6 +3772,228 @@ function ReceiptsPage({ clients }) {
 }
 
 // ─── PAYMENTS (Money to Suppliers) ───────────────────────────────────────────
+// ─── SHIPPING BALANCE ─────────────────────────────────────────────────────────
+function ShippingBalance({ suppliers, invoices, onRefresh }) {
+  const shippingSuppliers = suppliers.filter(s => s.is_shipping);
+  const [selected, setSelected] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "", payment_method: "cash_usd" });
+
+  useEffect(() => {
+    if (shippingSuppliers.length > 0 && !selected) setSelected(shippingSuppliers[0].id);
+  }, [shippingSuppliers.length]);
+
+  useEffect(() => {
+    if (selected) {
+      supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: true }).then(({ data }) => setPayments(data || []));
+    }
+  }, [selected]);
+
+  const reloadPayments = async () => {
+    const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: true });
+    setPayments(data || []);
+  };
+
+  // Get shipment charges from invoices for this shipping company
+  const supplier = shippingSuppliers.find(s => s.id === selected);
+  const shipInvoices = invoices.filter(i => {
+    if (i.type !== "buy" || !i.shipment_company) return false;
+    if (!supplier) return false;
+    if (i.shipment_company.toLowerCase() !== supplier.name.toLowerCase()) return false;
+    if (fromDate && i.date < fromDate) return false;
+    if (toDate && i.date > toDate) return false;
+    return true;
+  });
+
+  const filteredPayments = payments.filter(p => {
+    if (fromDate && p.date < fromDate) return false;
+    if (toDate && p.date > toDate) return false;
+    return true;
+  });
+
+  // Build ledger from shipment invoices + payments
+  const ledgerRows = [
+    ...shipInvoices.map(inv => {
+      const sub = (inv.invoice_items||[]).reduce((s,i)=>s+i.quantity*i.price,0);
+      const shipAmt = inv.shipment_type==="pct" ? sub*(inv.shipment_value||0)/100 : (inv.shipment_value||0);
+      return { date: inv.date, desc: `Shipment - Invoice ${inv.id}`, notes: inv.customer||"", debit: shipAmt, credit: 0, isInv: true };
+    }),
+    ...filteredPayments.map(p => ({
+      date: p.date, desc: p.type==="payment" ? "Payment Made" : "Additional Charge",
+      notes: p.notes||"", debit: p.type==="charge" ? +p.amount : 0,
+      credit: p.type==="payment" ? +p.amount : 0, isInv: false, raw: p, id: p.id
+    })),
+  ].sort((a, b) => a.date.localeCompare(b.date));
+
+  const totalCharged = ledgerRows.reduce((s,r)=>s+r.debit,0);
+  const totalPaid = ledgerRows.reduce((s,r)=>s+r.credit,0);
+  const balance = totalCharged - totalPaid;
+
+  const save = async () => {
+    if (!form.amount || !selected) return;
+    setSaving(true);
+    const payId = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
+    await supabase.from("supplier_payments").insert({ supplier_id: selected, date: form.date, amount: +form.amount, type: form.type, notes: form.notes, payment_method: form.payment_method });
+    if (form.type === "payment") {
+      await supabase.from("payments").insert({ id: payId, supplier_id: selected, date: form.date, amount: +form.amount, payment_method: form.payment_method, notes: form.notes });
+    }
+    setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "", payment_method: "cash_usd" });
+    setShowAdd(false);
+    await reloadPayments();
+    setSaving(false);
+  };
+
+  const delPayment = async (id) => {
+    if (!window.confirm("Delete this record?")) return;
+    await supabase.from("supplier_payments").delete().eq("id", id);
+    await reloadPayments();
+  };
+
+  const printLedger = () => {
+    let running = 0;
+    const rows = ledgerRows.map(r => {
+      running += r.debit - r.credit;
+      return `<tr><td>${r.date}</td><td>${r.desc}</td><td>${r.notes||"—"}</td><td style="color:#cc0000">${r.debit>0?"$"+r.debit.toFixed(2):"—"}</td><td style="color:#006600">${r.credit>0?"$"+r.credit.toFixed(2):"—"}</td><td style="font-weight:800;color:${running>0?"#cc0000":"#006600"}">${"$"+Math.abs(running).toFixed(2)+" "+(running>0?"DR":"CR")}</td></tr>`;
+    }).join("");
+    const period = fromDate||toDate ? ` (${fromDate||"start"} → ${toDate||"today"})` : " (All Time)";
+    const html = `<!DOCTYPE html><html><head><title>Shipping Ledger</title><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;padding:30px;font-size:12px;}h1{font-size:18px;font-weight:800;margin-bottom:4px;}h2{font-size:14px;color:#666;margin-bottom:20px;}table{width:100%;border-collapse:collapse;}th{background:#000;color:#fff;padding:8px;text-align:left;}td{padding:7px 8px;border-bottom:1px solid #eee;}tr:nth-child(even){background:#f9f9f9;}.footer{margin-top:20px;text-align:center;font-size:10px;color:#999;}</style></head><body><h1>⚡ ElectroPro — Shipping Ledger</h1><h2>${supplier?.name||""}${period}</h2><table><thead><tr><th>Date</th><th>Description</th><th>Notes</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">Printed: ${new Date().toLocaleDateString()} • ElectroPro</div><script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}</script></body></html>`;
+    const w = window.open("","_blank","width=900,height=700"); w.document.write(html); w.document.close();
+  };
+
+  if (shippingSuppliers.length === 0) return (
+    <div className="page">
+      <h2 style={{ fontSize:28, fontWeight:800, marginBottom:16 }}>🚢 Shipping Balance</h2>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:40, textAlign:"center" }}>
+        <p style={{ color:T.muted, fontSize:14 }}>No shipping companies found.</p>
+        <p style={{ color:T.muted, fontSize:13, marginTop:8 }}>Go to <strong>Suppliers</strong> and check <strong>"🚢 Shipping Company"</strong> on your shipping suppliers.</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="page">
+      <h2 style={{ fontSize:28, fontWeight:800, marginBottom:6 }}>🚢 Shipping Balance</h2>
+      <p style={{ color:T.muted, fontSize:13, marginBottom:24 }}>Track shipment charges and payments per shipping company</p>
+
+      {/* Shipping company selector */}
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:24 }}>
+        {shippingSuppliers.map(s => (
+          <button key={s.id} onClick={() => setSelected(s.id)} style={{ padding:"8px 18px", borderRadius:10, border:`2px solid ${selected===s.id?T.accent:T.border}`, background:selected===s.id?T.accentDim:"transparent", color:selected===s.id?T.accent:T.muted, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+            🚢 {s.name}
+          </button>
+        ))}
+      </div>
+
+      {selected && (
+        <>
+          {/* Summary cards */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:16, marginBottom:24 }}>
+            <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:20 }}>
+              <div style={{ fontSize:11, color:T.muted, textTransform:"uppercase", marginBottom:8 }}>Total Shipment Charges</div>
+              <div style={{ fontSize:24, fontWeight:800, color:T.red, fontFamily:T.mono }}>{fmt(totalCharged)}</div>
+              <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{shipInvoices.length} invoices</div>
+            </div>
+            <div style={{ background:T.card, border:`1px solid ${T.green}44`, borderRadius:12, padding:20 }}>
+              <div style={{ fontSize:11, color:T.muted, textTransform:"uppercase", marginBottom:8 }}>Total Paid</div>
+              <div style={{ fontSize:24, fontWeight:800, color:T.green, fontFamily:T.mono }}>{fmt(totalPaid)}</div>
+            </div>
+            <div style={{ background:T.card, border:`1px solid ${balance>0?T.red:T.green}44`, borderRadius:12, padding:20 }}>
+              <div style={{ fontSize:11, color:T.muted, textTransform:"uppercase", marginBottom:8 }}>Balance Owed</div>
+              <div style={{ fontSize:24, fontWeight:800, color:balance>0?T.red:T.green, fontFamily:T.mono }}>{fmt(Math.abs(balance))}</div>
+              <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{balance>0?"You owe this":"All paid ✅"}</div>
+            </div>
+          </div>
+
+          {/* Date filter + actions */}
+          <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 14px", marginBottom:16 }}>
+            <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase" }}>📅 From:</span>
+            <input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} style={{ width:"auto" }} />
+            <span style={{ fontSize:11, color:T.muted, textTransform:"uppercase" }}>To:</span>
+            <input type="date" value={toDate} onChange={e=>setToDate(e.target.value)} style={{ width:"auto" }} />
+            <button onClick={()=>{setFromDate("");setToDate("");}} style={{ background:"transparent", border:`1px solid ${T.border}`, borderRadius:6, padding:"4px 10px", color:T.muted, fontSize:11, cursor:"pointer" }}>Clear</button>
+            <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+              <button onClick={printLedger} style={{ background:T.green+"22", border:`1px solid ${T.green}44`, borderRadius:8, padding:"6px 14px", color:T.green, fontSize:12, fontWeight:700, cursor:"pointer" }}>🖨️ Print Ledger</button>
+              <Btn small onClick={()=>setShowAdd(!showAdd)}>+ Record Payment</Btn>
+            </div>
+          </div>
+
+          {/* Add payment form */}
+          {showAdd && (
+            <div style={{ background:T.card, border:`1px solid ${T.green}44`, borderRadius:12, padding:20, marginBottom:16 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:12 }}>
+                <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>DATE</div><input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} /></div>
+                <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>TYPE</div>
+                  <select value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>
+                    <option value="payment">Payment Made</option>
+                    <option value="charge">Additional Charge</option>
+                  </select>
+                </div>
+                <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>AMOUNT ($)</div><input type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} placeholder="0.00" /></div>
+                {form.type==="payment" && <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>METHOD</div>
+                  <select value={form.payment_method} onChange={e=>setForm({...form,payment_method:e.target.value})}>
+                    <option value="cash_usd">💵 Cash USD</option>
+                    <option value="wallet_usdt">💎 Wallet USDT</option>
+                    <option value="bank_transfer">🏦 Bank Transfer</option>
+                  </select>
+                </div>}
+                <div><div style={{ fontSize:11, color:T.muted, marginBottom:4 }}>NOTES</div><input value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Optional" /></div>
+              </div>
+              <div style={{ display:"flex", gap:10, marginTop:12 }}>
+                <Btn small onClick={save} loading={saving}>Save</Btn>
+                <Btn small outline onClick={()=>setShowAdd(false)}>Cancel</Btn>
+              </div>
+            </div>
+          )}
+
+          {/* Ledger */}
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th><th>Description</th><th>Notes</th>
+                  <th style={{ color:T.red }}>Debit (Charged)</th>
+                  <th style={{ color:T.green }}>Credit (Paid)</th>
+                  <th style={{ color:T.accent }}>Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  let running = 0;
+                  return ledgerRows.map((row, i) => {
+                    running += row.debit - row.credit;
+                    return (
+                      <tr key={i} style={{ background: row.isInv ? T.surface+"88" : "transparent" }}>
+                        <td style={{ fontFamily:T.mono, fontSize:12 }}>{row.date}</td>
+                        <td style={{ fontSize:12, fontWeight:row.isInv?700:400, color:row.isInv?T.accent:T.text }}>{row.desc}</td>
+                        <td style={{ fontSize:12, color:T.muted }}>{row.notes||"—"}</td>
+                        <td style={{ fontFamily:T.mono, color:T.red, fontWeight:700 }}>{row.debit>0?fmt(row.debit):"—"}</td>
+                        <td style={{ fontFamily:T.mono, color:T.green, fontWeight:700 }}>{row.credit>0?fmt(row.credit):"—"}</td>
+                        <td style={{ fontFamily:T.mono, fontWeight:800, color:running>0?T.red:T.green }}>{fmt(Math.abs(running))} {running>0?"DR":"CR"}</td>
+                        <td>
+                          {!row.isInv && (
+                            <button onClick={()=>delPayment(row.id)} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"4px 8px", color:T.red, fontSize:11, cursor:"pointer" }}>🗑️</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
+                {ledgerRows.length===0 && <tr><td colSpan={7} style={{ textAlign:"center", color:T.muted, padding:32 }}>No records found</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PaymentsPage({ suppliers }) {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -4175,6 +4401,7 @@ export default function App() {
     { id: "receipts", label: "Receipts", icon: "🟢" },
     { id: "suppliers", label: "Suppliers", icon: "🏭" },
     { id: "supplier-balance", label: "Supplier Balance", icon: "💰" },
+    { id: "shipping-balance", label: "Shipping Balance", icon: "🚢" },
     { id: "payments", label: "Payments", icon: "🔴" },
     { id: "orders", label: "Sales Orders", icon: "📋" },
     { id: "invoices", label: "Invoices", icon: "🧾" },
@@ -4237,6 +4464,7 @@ export default function App() {
               {page === "client-balance" && <ClientBalance clients={clients} invoices={invoices} onRefresh={loadData} />}
               {page === "suppliers" && <SuppliersPage suppliers={suppliers} onRefresh={loadData} />}
               {page === "supplier-balance" && <SupplierBalance suppliers={suppliers} invoices={invoices} onRefresh={loadData} />}
+              {page === "shipping-balance" && <ShippingBalance suppliers={suppliers} invoices={invoices} onRefresh={loadData} />}
               {page === "receipts" && <ReceiptsPage clients={clients} />}
               {page === "payments" && <PaymentsPage suppliers={suppliers} />}
               {page === "orders" && <SalesOrders products={products} locations={locations} invoices={invoices} setInvoices={setInvoices} onRefresh={loadData} />}
