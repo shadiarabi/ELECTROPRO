@@ -1264,13 +1264,27 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                       )}
                       {/* BSM Profit */}
                       <div style={{ background:T.card, borderRadius:10, padding:12 }}>
-                        <div style={{ fontSize:11, color:T.green, fontWeight:700, marginBottom:8 }}>🏦 BSM Profit Paid</div>
+                        <div style={{ fontSize:11, color:T.green, fontWeight:700, marginBottom:8 }}>🏦 BSM Profit</div>
                         <input type="number" value={editInv.partial_bsm||""} onChange={e=>setEditInv({...editInv,partial_bsm:e.target.value})} placeholder="0.00" style={{ width:"100%", marginBottom:8 }} />
-                        <select value={editInv.partial_bsm_method||"cash_usd"} onChange={e=>setEditInv({...editInv,partial_bsm_method:e.target.value})} style={{ width:"100%", fontSize:12 }}>
-                          <option value="cash_usd">💵 Cash USD</option>
-                          <option value="wallet_usdt">💎 Wallet USDT</option>
-                          <option value="bank_transfer">🏦 Bank Transfer</option>
-                        </select>
+                        <div style={{ fontSize:10, color:T.muted, marginBottom:6, textTransform:"uppercase" }}>Status</div>
+                        <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                          {[
+                            { val:"pending", label:"⏳ Pending", color:T.red },
+                            { val:"on_account", label:"✅ On Account", color:T.green },
+                          ].map(opt => (
+                            <button key={opt.val} onClick={() => setEditInv({...editInv, bsm_profit_status: opt.val})}
+                              style={{ flex:1, background: (editInv.bsm_profit_status||"pending")===opt.val ? opt.color+"33" : "transparent", color: (editInv.bsm_profit_status||"pending")===opt.val ? opt.color : T.muted, border:`2px solid ${(editInv.bsm_profit_status||"pending")===opt.val ? opt.color : T.border}`, borderRadius:8, padding:"5px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        {(editInv.bsm_profit_status||"pending") === "on_account" && (
+                          <select value={editInv.partial_bsm_method||"cash_usd"} onChange={e=>setEditInv({...editInv,partial_bsm_method:e.target.value})} style={{ width:"100%", fontSize:12 }}>
+                            <option value="cash_usd">💵 Cash USD</option>
+                            <option value="wallet_usdt">💎 Wallet USDT</option>
+                            <option value="bank_transfer">🏦 Bank Transfer</option>
+                          </select>
+                        )}
                       </div>
                     </div>
                     {/* Summary */}
