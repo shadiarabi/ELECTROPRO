@@ -572,10 +572,36 @@ function Inventory({ products, locations, onRefresh, userProfile }) {
       await Promise.all(updates.slice(i, i + 20));
     }
 
+    // Recalculate weighted average cost for all products from purchase invoices
+    setSyncMsg("Recalculating costs...");
+    const { data: allProds } = await supabase.from("products").select("id");
+    for (const prod of (allProds || [])) {
+      const { data: invItems } = await supabase.from("invoice_items").select("quantity, price, invoice_id").eq("product_id", prod.id);
+      const { data: invs } = await supabase.from("invoices").select("id, shipment_value, shipment_type, type").eq("type", "buy");
+      const invMap = {};
+      (invs || []).forEach(inv => { invMap[inv.id] = inv; });
+      let totalQty = 0, totalCost = 0;
+      (invItems || []).forEach(ii => {
+        const inv = invMap[ii.invoice_id];
+        if (!inv) return;
+        const invSubtotal = (invItems || []).filter(x => x.invoice_id === ii.invoice_id).reduce((s, x) => s + x.quantity * x.price, 0);
+        const invShipAmt = inv.shipment_type === "pct" ? invSubtotal * (inv.shipment_value || 0) / 100 : (inv.shipment_value || 0);
+        const itemValue = ii.quantity * ii.price;
+        const shipShare = invSubtotal > 0 ? invShipAmt * (itemValue / invSubtotal) : 0;
+        const costPerUnit = ii.price + (ii.quantity > 0 ? shipShare / ii.quantity : 0);
+        totalQty += +ii.quantity;
+        totalCost += costPerUnit * +ii.quantity;
+      });
+      if (totalQty > 0) {
+        const avgCost = totalCost / totalQty;
+        await supabase.from("products").update({ cost_price: +avgCost.toFixed(4) }).eq("id", prod.id);
+      }
+    }
+
     setSyncMsg("");
     setSyncing(false);
     onRefresh();
-    alert("✅ Stock re-synced successfully!");
+    alert("✅ Stock and costs re-synced successfully!");
   };
 
   const filtered = products.filter(p =>
@@ -875,18 +901,38 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         }
       }
 
-      // Distribute shipment fees to product cost prices (purchase only)
-      // Uses item.price (purchase price on this invoice) NOT item.cost (which may already be inflated)
+      // Distribute shipment fees to product cost prices using weighted average
+      // Recalculates from ALL purchase invoices to avoid stacking
       if (newInv.type === "buy" && newInv.distributeShipment && shipmentAmt > 0) {
         const totalItemValue = newInv.items.reduce((s, i) => s + +i.qty * i.price, 0);
         if (totalItemValue > 0) {
           await Promise.all(newInv.items.map(async item => {
-            const itemValue = +item.qty * item.price;
-            const share = shipmentAmt * (itemValue / totalItemValue);
-            const extraPerUnit = share / +item.qty;
-            // Use item.price (this invoice's purchase price) as base — not item.cost
-            const newCost = +item.price + extraPerUnit;
-            await supabase.from("products").update({ cost_price: +newCost.toFixed(4) }).eq("id", +item.productId);
+            const productId = +item.productId;
+            // Get ALL purchase invoice items for this product to calculate true weighted avg
+            const { data: allInvItems } = await supabase
+              .from("invoice_items")
+              .select("quantity, price, invoice_id")
+              .eq("product_id", productId);
+            const { data: allInvs } = await supabase
+              .from("invoices")
+              .select("id, shipment_value, shipment_type")
+              .eq("type", "buy");
+            const invMap = {};
+            (allInvs || []).forEach(inv => { invMap[inv.id] = inv; });
+            let totalQty = 0, totalCost = 0;
+            (allInvItems || []).forEach(ii => {
+              const inv = invMap[ii.invoice_id];
+              if (!inv) return;
+              const invSubtotal = (allInvItems || []).filter(x => x.invoice_id === ii.invoice_id).reduce((s, x) => s + x.quantity * x.price, 0);
+              const invShipAmt = inv.shipment_type === "pct" ? invSubtotal * (inv.shipment_value || 0) / 100 : (inv.shipment_value || 0);
+              const itemValue = ii.quantity * ii.price;
+              const shipShare = invSubtotal > 0 ? invShipAmt * (itemValue / invSubtotal) : 0;
+              const costPerUnit = ii.price + (ii.quantity > 0 ? shipShare / ii.quantity : 0);
+              totalQty += +ii.quantity;
+              totalCost += costPerUnit * +ii.quantity;
+            });
+            const avgCost = totalQty > 0 ? totalCost / totalQty : +item.price;
+            await supabase.from("products").update({ cost_price: +avgCost.toFixed(4) }).eq("id", productId);
           }));
         }
       }
@@ -2934,7 +2980,18 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
 
   const delPayment = async (id) => {
     if (!window.confirm("Delete this payment record?")) return;
+    // Get details before deleting for cross-table sync
+    const sp = payments.find(p => p.id === id);
     await supabase.from("supplier_payments").delete().eq("id", id);
+    // Also delete matching record from payments table
+    if (sp && sp.type === "payment") {
+      const { data: pRows } = await supabase.from("payments")
+        .select("id").eq("supplier_id", selected)
+        .eq("amount", sp.amount).eq("date", sp.date).limit(1);
+      if (pRows && pRows.length > 0) {
+        await supabase.from("payments").delete().eq("id", pRows[0].id);
+      }
+    }
     await refreshInvoices();
     await reloadPayments();
   };
@@ -3507,7 +3564,18 @@ function PaymentsPage({ suppliers }) {
 
   const del = async (id) => {
     if (!window.confirm("Delete this payment?")) return;
+    // Get payment details before deleting
+    const payment = payments.find(p => p.id === id);
     await supabase.from("payments").delete().eq("id", id);
+    // Also delete matching record from supplier_payments
+    if (payment) {
+      const { data: spRows } = await supabase.from("supplier_payments")
+        .select("id").eq("supplier_id", payment.supplier_id)
+        .eq("type", "payment").eq("amount", payment.amount).eq("date", payment.date).limit(1);
+      if (spRows && spRows.length > 0) {
+        await supabase.from("supplier_payments").delete().eq("id", spRows[0].id);
+      }
+    }
     load();
   };
 
