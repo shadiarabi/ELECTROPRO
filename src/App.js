@@ -4431,14 +4431,22 @@ function PaymentsPage({ suppliers }) {
 
 // ─── APP SHELL ────────────────────────────────────────────────────────────────
 export default function App() {
-  const [pageHistory, setPageHistory] = useState(["dashboard"]);
+  const savedPage = sessionStorage.getItem("electropro_page") || "dashboard";
+  const [pageHistory, setPageHistory] = useState([savedPage]);
   const page = pageHistory[pageHistory.length - 1];
   const [loading, setLoading] = useState(true);
   const [, forceUpdate] = useState(0);
   const handleThemeChange = () => { T = getTheme(); forceUpdate(n => n + 1); };
 
-  const setPage = (newPage) => setPageHistory(prev => [...prev, newPage]);
-  const goBack = () => setPageHistory(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+  const setPage = (newPage) => {
+    sessionStorage.setItem("electropro_page", newPage);
+    setPageHistory(prev => [...prev, newPage]);
+  };
+  const goBack = () => setPageHistory(prev => {
+    const next = prev.length > 1 ? prev.slice(0, -1) : prev;
+    sessionStorage.setItem("electropro_page", next[next.length - 1]);
+    return next;
+  });
 
   // ESC key → go back one page
   useEffect(() => {
@@ -4585,7 +4593,7 @@ export default function App() {
           </div>
           <div style={{ padding: "12px 8px", flex: 1 }}>
             {NAV.map(n => (
-              <button key={n.id} onClick={() => setPageHistory([n.id])} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", background: page === n.id ? T.accentDim : "transparent", color: page === n.id ? T.accent : T.muted, border: "none", borderRadius: 8, fontSize: 12, fontWeight: page === n.id ? 700 : 400, textAlign: "left", marginBottom: 2, transition: "all .15s", borderLeft: page === n.id ? `2px solid ${T.accent}` : "2px solid transparent", whiteSpace: "nowrap", overflow: "hidden" }}>
+              <button key={n.id} onClick={() => { sessionStorage.setItem("electropro_page", n.id); setPageHistory([n.id]); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", background: page === n.id ? T.accentDim : "transparent", color: page === n.id ? T.accent : T.muted, border: "none", borderRadius: 8, fontSize: 12, fontWeight: page === n.id ? 700 : 400, textAlign: "left", marginBottom: 2, transition: "all .15s", borderLeft: page === n.id ? `2px solid ${T.accent}` : "2px solid transparent", whiteSpace: "nowrap", overflow: "hidden" }}>
                 <span style={{ flexShrink: 0 }}>{n.icon}</span>
                 <span className="nav-label" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
               </button>
