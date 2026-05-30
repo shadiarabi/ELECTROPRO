@@ -917,13 +917,14 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         }
       }
 
-      // Auto-record supplier PAYMENT only (invoice already shows as debit in ledger)
-      // Only insert a payment record — no charge needed since invoices are debits
+      // Auto-record supplier PAYMENT in both tables
       if (newInv.type === "buy" && newInv.supplier_id && newInv.paymentStatus !== "pending") {
         const supplierAmountPaid = newInv.paymentStatus === "paid"
           ? grandTotal - shipmentAmt
           : (+newInv.amountPaid || 0);
         if (supplierAmountPaid > 0) {
+          const payId = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
+          // Insert into supplier_payments (for Supplier Balance)
           await supabase.from("supplier_payments").insert({
             supplier_id: +newInv.supplier_id,
             date: newInv.date,
@@ -931,6 +932,16 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             type: "payment",
             notes: `Payment for invoice ${invId}`,
             payment_method: newInv.paymentMethod || null,
+          });
+          // Insert into payments (for Payments page)
+          await supabase.from("payments").insert({
+            id: payId,
+            supplier_id: +newInv.supplier_id,
+            date: newInv.date,
+            amount: supplierAmountPaid,
+            payment_method: newInv.paymentMethod || "cash_usd",
+            notes: `Payment for invoice ${invId}`,
+            reference: newInv.paymentReference || null,
           });
         }
       }
@@ -2825,7 +2836,7 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [editPayment, setEditPayment] = useState(null);
-  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "", payment_method: "cash_usd" });
 
   const reloadPayments = async () => {
     const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: false });
@@ -2894,8 +2905,16 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
     if (!form.amount || !selected) return;
     setSaving(true);
     await supabase.from("supplier_payments").insert({ supplier_id: selected, date: form.date, amount: +form.amount, type: form.type, notes: form.notes });
+    // Also insert into payments table if it's a payment (not a charge)
+    if (form.type === "payment") {
+      const payId = "PAY-" + Math.random().toString(36).slice(2,8).toUpperCase();
+      await supabase.from("payments").insert({
+        id: payId, supplier_id: selected, date: form.date,
+        amount: +form.amount, payment_method: form.payment_method || "cash_usd", notes: form.notes || null,
+      });
+    }
     await refreshInvoices();
-    setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
+    setForm({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "", payment_method: "cash_usd" });
     setShowAdd(false);
     await reloadPayments();
     setSaving(false);
@@ -3031,6 +3050,15 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
                   </select>
                 </div>
                 <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>AMOUNT ($)</div><input type="number" value={form.amount} onChange={e => setForm({...form,amount:e.target.value})} placeholder="0.00" /></div>
+                {form.type === "payment" && (
+                  <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PAYMENT METHOD</div>
+                    <select value={form.payment_method} onChange={e => setForm({...form,payment_method:e.target.value})}>
+                      <option value="cash_usd">💵 Cash USD</option>
+                      <option value="wallet_usdt">💎 Wallet USDT</option>
+                      <option value="bank_transfer">🏦 Bank Transfer</option>
+                    </select>
+                  </div>
+                )}
                 <div><div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>NOTES</div><input value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} placeholder="Optional" /></div>
               </div>
               <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
