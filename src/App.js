@@ -2049,21 +2049,24 @@ function SuppliersPage({ suppliers, onRefresh }) {
 }
 
 // ─── SALES ORDERS ────────────────────────────────────────────────────────────
-function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) {
+function SalesOrders({ products, locations, invoices, setInvoices, onRefresh, clients, suppliers }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [converting, setConverting] = useState(null);
-  const [newOrder, setNewOrder] = useState({ location_id: "", customer: "", date: new Date().toISOString().slice(0, 10), notes: "", items: [] });
+  const [newOrder, setNewOrder] = useState({
+    type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "",
+    date: new Date().toISOString().slice(0, 10), notes: "", items: [],
+    reserveStock: false,
+  });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase.from("sales_orders").select("*, sales_order_items(*), locations(name)").order("created_at", { ascending: false });
     setOrders((data || []).map(o => ({
-      ...o,
-      locationName: o.locations?.name || "",
+      ...o, locationName: o.locations?.name || "",
       total: (o.sales_order_items || []).reduce((s, i) => s + i.quantity * i.price, 0),
       items: o.sales_order_items || [],
     })));
@@ -2075,9 +2078,14 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
   const addItem = () => {
     const prod = products.find(p => p.id === +itemForm.productId);
     if (!prod) return;
-    const basePrice = itemForm.customPrice !== "" ? +itemForm.customPrice : prod.sell_price;
+    const basePrice = itemForm.customPrice !== "" ? +itemForm.customPrice : (newOrder.type === "sell" ? prod.sell_price : prod.cost_price);
     const discPct = +itemForm.discountPct || 0;
     const finalPrice = basePrice * (1 - discPct / 100);
+    // Check available stock
+    const stock = prod.stockByLocation?.[+newOrder.location_id] || 0;
+    if (newOrder.type === "sell" && stock < +itemForm.qty) {
+      if (!window.confirm(`⚠️ Only ${stock} pcs available at this location. Add anyway?`)) return;
+    }
     setNewOrder({ ...newOrder, items: [...newOrder.items, { productId: prod.id, name: prod.name, qty: +itemForm.qty, price: finalPrice, originalPrice: basePrice, discountPct: discPct, cost: prod.cost_price }] });
     setItemForm({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
   };
@@ -2088,15 +2096,29 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
     const orderId = "ORD-" + Math.random().toString(36).slice(2, 8).toUpperCase();
     const { error } = await supabase.from("sales_orders").insert({
       id: orderId, date: newOrder.date, location_id: +newOrder.location_id,
-      customer: newOrder.customer, status: "draft", notes: newOrder.notes
+      customer: newOrder.customer, status: "draft", notes: newOrder.notes,
+      type: newOrder.type || "sell",
+      client_id: newOrder.client_id ? +newOrder.client_id : null,
+      supplier_id: newOrder.supplier_id ? +newOrder.supplier_id : null,
+      reserve_stock: newOrder.reserveStock,
     });
     if (!error) {
       await supabase.from("sales_order_items").insert(
         newOrder.items.map(i => ({ order_id: orderId, product_id: i.productId, product_name: i.name, quantity: i.qty, price: i.price, cost: i.cost }))
       );
+      // Reserve stock if checkbox checked
+      if (newOrder.reserveStock) {
+        for (const item of newOrder.items) {
+          const { data: stockRow } = await supabase.from("stock").select("id, quantity").eq("product_id", +item.productId).eq("location_id", +newOrder.location_id).single();
+          if (stockRow) {
+            await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity - +item.qty) }).eq("id", stockRow.id);
+          }
+        }
+      }
       setShowCreate(false);
-      setNewOrder({ location_id: "", customer: "", date: new Date().toISOString().slice(0, 10), notes: "", items: [] });
+      setNewOrder({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), notes: "", items: [], reserveStock: false });
       loadOrders();
+      if (newOrder.reserveStock) onRefresh();
     }
     setSaving(false);
   };
@@ -2109,19 +2131,29 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
   const convertToInvoice = async (order) => {
     setConverting(order.id);
     const invId = "INV-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+    const type = order.type || "sell";
+    const total = order.items.reduce((s, i) => s + i.quantity * i.price, 0);
+    const cogs = order.items.reduce((s, i) => s + i.quantity * (i.cost||0), 0);
     const { error } = await supabase.from("invoices").insert({
-      id: invId, type: "sell", date: order.date,
-      location_id: order.location_id, customer: order.customer, status: "paid", payment_status: "paid"
+      id: invId, type, date: order.date, location_id: order.location_id,
+      customer: order.customer, status: "pending", payment_status: "pending",
+      total, cogs, profit: total - cogs,
+      client_id: order.client_id || null,
+      supplier_id: order.supplier_id || null,
+      discount_type: "fixed", discount_value: 0,
+      shipment_type: "fixed", shipment_value: 0,
     });
     if (!error) {
       await supabase.from("invoice_items").insert(
-        order.items.map(i => ({ invoice_id: invId, product_id: +i.product_id, product_name: i.product_name, quantity: +i.quantity, price: i.price, cost: i.cost }))
+        order.items.map(i => ({ invoice_id: invId, product_id: +i.product_id, product_name: i.product_name, quantity: +i.quantity, price: i.price, original_price: i.price, discount_pct: 0, cost: i.cost||0 }))
       );
-      // Deduct stock using id-based update
-      for (const item of order.items) {
-        const { data: stockRow, error: sErr } = await supabase.from("stock").select("id, quantity").eq("product_id", +item.product_id).eq("location_id", +order.location_id).single();
-        if (stockRow && !sErr) {
-          await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity - +item.quantity) }).eq("id", stockRow.id);
+      // Only deduct stock if NOT already reserved
+      if (!order.reserve_stock) {
+        for (const item of order.items) {
+          const { data: stockRow } = await supabase.from("stock").select("id, quantity").eq("product_id", +item.product_id).eq("location_id", +order.location_id).single();
+          if (stockRow) {
+            await supabase.from("stock").update({ quantity: Math.max(0, stockRow.quantity - +item.quantity) }).eq("id", stockRow.id);
+          }
         }
       }
       await supabase.from("sales_orders").update({ status: "invoiced" }).eq("id", order.id);
@@ -2131,27 +2163,44 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
     setConverting(null);
   };
 
+  const cancelOrder = async (order) => {
+    if (!window.confirm("Cancel this order?")) return;
+    // Return reserved stock if stock was reserved
+    if (order.reserve_stock) {
+      for (const item of order.items) {
+        const { data: stockRow } = await supabase.from("stock").select("id, quantity").eq("product_id", +item.product_id).eq("location_id", +order.location_id).single();
+        if (stockRow) {
+          await supabase.from("stock").update({ quantity: stockRow.quantity + +item.quantity }).eq("id", stockRow.id);
+        }
+      }
+      onRefresh();
+    }
+    await supabase.from("sales_orders").update({ status: "cancelled" }).eq("id", order.id);
+    loadOrders();
+  };
+
   const statusColor = { draft: T.muted, confirmed: T.yellow, invoiced: T.green, cancelled: T.red };
+  const orderTotal = newOrder.items.reduce((s, i) => s + i.qty * i.price, 0);
 
   return (
     <div className="page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h2 style={{ fontSize: 28, fontWeight: 800 }}>Sales Orders</h2>
-          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>Create orders before finalizing invoices</p>
+          <h2 style={{ fontSize: 28, fontWeight: 800 }}>Orders</h2>
+          <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>Sales & Purchase orders before invoicing</p>
         </div>
         <Btn onClick={() => setShowCreate(!showCreate)}>+ New Order</Btn>
       </div>
 
-      {/* How it works */}
+      {/* Workflow steps */}
       <div style={{ background: T.card, border: `1px solid ${T.accent}33`, borderRadius: 12, padding: 16, marginBottom: 24, display: "flex", gap: 20, flexWrap: "wrap" }}>
         {[
-          { step: "1", label: "Create Order", desc: "Draft — no stock deducted", color: T.muted },
-          { step: "2", label: "Confirm Order", desc: "Customer confirmed", color: T.yellow },
-          { step: "3", label: "Convert to Invoice", desc: "Stock deducted automatically", color: T.green },
+          { step: "1", label: "Create Order", desc: "Draft — optionally reserve stock", color: T.muted },
+          { step: "2", label: "Confirm Order", desc: "Customer/supplier confirmed", color: T.yellow },
+          { step: "3", label: "Convert to Invoice", desc: "Finalize — stock deducted", color: T.green },
         ].map(s => (
           <div key={s.step} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 28, height: 28, borderRadius: "50%", background: s.color + "22", border: `1px solid ${s.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: s.color }}>{s.step}</div>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", background: s.color+"22", border: `1px solid ${s.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: s.color }}>{s.step}</div>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: s.color }}>{s.label}</div>
               <div style={{ fontSize: 11, color: T.muted }}>{s.desc}</div>
@@ -2160,149 +2209,180 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
         ))}
       </div>
 
+      {/* Create Order Form */}
       {showCreate && (
         <div style={{ background: T.card, border: `1px solid ${T.accent}44`, borderRadius: 12, padding: 24, marginBottom: 24 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: T.accent }}>New Sales Order</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12, marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: T.accent }}>New Order</h3>
+
+          {/* Order Type */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textTransform: "uppercase" }}>Order Type</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              {[["sell","🛒 Sales Order"],["buy","📦 Purchase Order"]].map(([val,lbl]) => (
+                <button key={val} onClick={() => setNewOrder({...newOrder, type:val, customer:"", client_id:"", supplier_id:""})}
+                  style={{ padding:"8px 18px", borderRadius:10, border:`2px solid ${newOrder.type===val?T.accent:T.border}`, background:newOrder.type===val?T.accentDim:"transparent", color:newOrder.type===val?T.accent:T.muted, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12, marginBottom: 16 }}>
+            {/* Client or Supplier */}
             <div>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>LOCATION</div>
-              <select value={newOrder.location_id} onChange={e => setNewOrder({ ...newOrder, location_id: e.target.value })}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>{newOrder.type==="sell" ? "Client" : "Supplier"}</div>
+              <select value={newOrder.type==="sell" ? newOrder.client_id : newOrder.supplier_id} onChange={e => {
+                const id = e.target.value;
+                if (newOrder.type==="sell") {
+                  const c = clients.find(c => c.id === +id);
+                  setNewOrder({...newOrder, client_id: id, customer: c?.name||""});
+                } else {
+                  const s = suppliers.find(s => s.id === +id);
+                  setNewOrder({...newOrder, supplier_id: id, customer: s?.name||""});
+                }
+              }}>
+                <option value="">Select {newOrder.type==="sell"?"client":"supplier"}...</option>
+                {newOrder.type==="sell"
+                  ? clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                  : suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                }
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Location</div>
+              <select value={newOrder.location_id} onChange={e => setNewOrder({...newOrder, location_id: e.target.value})}>
                 <option value="">Select location...</option>
                 {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
             <div>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>CUSTOMER</div>
-              <input value={newOrder.customer} onChange={e => setNewOrder({ ...newOrder, customer: e.target.value })} placeholder="Customer name" />
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Date</div>
+              <input type="date" value={newOrder.date} onChange={e => setNewOrder({...newOrder, date: e.target.value})} />
             </div>
             <div>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DATE</div>
-              <input type="date" value={newOrder.date} onChange={e => setNewOrder({ ...newOrder, date: e.target.value })} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>NOTES</div>
-              <input value={newOrder.notes} onChange={e => setNewOrder({ ...newOrder, notes: e.target.value })} placeholder="Optional notes" />
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>Notes</div>
+              <input value={newOrder.notes} onChange={e => setNewOrder({...newOrder, notes: e.target.value})} placeholder="Optional notes..." />
             </div>
           </div>
-          <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div style={{ flex: 2, minWidth: 160 }}>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRODUCT</div>
-              <select value={itemForm.productId} onChange={e => {
-                const prod = products.find(p => p.id === +e.target.value);
-                setItemForm({ ...itemForm, productId: e.target.value, customPrice: prod ? prod.sell_price : "" });
-              }}>
-                <option value="">Select product...</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.name} — {fmt(p.sell_price)}</option>)}
-              </select>
-            </div>
-            <div style={{ width: 70 }}>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>QTY</div>
-              <input type="number" value={itemForm.qty} onChange={e => setItemForm({ ...itemForm, qty: e.target.value })} min="1" />
-            </div>
-            <div style={{ width: 120 }}>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRICE ($)</div>
-              <input type="number" value={itemForm.customPrice} onChange={e => setItemForm({ ...itemForm, customPrice: e.target.value })} placeholder="Default" min="0" />
-            </div>
-            <div style={{ width: 90 }}>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DISC (%)</div>
-              <input type="number" value={itemForm.discountPct} onChange={e => setItemForm({ ...itemForm, discountPct: e.target.value })} placeholder="0" min="0" max="100" />
-            </div>
-            <Btn small onClick={addItem} disabled={!itemForm.productId}>Add</Btn>
+
+          {/* Reserve Stock checkbox */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, background: T.surface, borderRadius: 8, padding: "10px 14px", border: `1px solid ${newOrder.reserveStock ? T.yellow+"66" : T.border}` }}>
+            <input type="checkbox" id="reserveStock" checked={newOrder.reserveStock} onChange={e => setNewOrder({...newOrder, reserveStock: e.target.checked})} style={{ width:16, height:16, cursor:"pointer" }} />
+            <label htmlFor="reserveStock" style={{ fontSize:13, color:newOrder.reserveStock?T.yellow:T.muted, cursor:"pointer", fontWeight:newOrder.reserveStock?700:400 }}>
+              📦 Reserve stock now (deduct from inventory immediately when order is saved)
+            </label>
           </div>
+
+          {/* Add Items */}
+          <div style={{ background: T.surface, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: T.accent, fontWeight: 700, marginBottom: 12, textTransform: "uppercase" }}>Add Products</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: 2, minWidth: 160 }}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRODUCT</div>
+                <select value={itemForm.productId} onChange={e => {
+                  const prod = products.find(p => p.id === +e.target.value);
+                  setItemForm({ ...itemForm, productId: e.target.value, customPrice: prod ? (newOrder.type==="sell" ? prod.sell_price : prod.cost_price) : "" });
+                }}>
+                  <option value="">Select product...</option>
+                  {products.map(p => {
+                    const stock = p.stockByLocation?.[+newOrder.location_id] || 0;
+                    return <option key={p.id} value={p.id}>{p.name} — Stock: {stock} pcs</option>;
+                  })}
+                </select>
+              </div>
+              <div style={{ width: 70 }}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>QTY</div>
+                <input type="number" value={itemForm.qty} onChange={e => setItemForm({...itemForm, qty: e.target.value})} min="1" />
+              </div>
+              <div style={{ width: 120 }}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRICE ($)</div>
+                <input type="number" value={itemForm.customPrice} onChange={e => setItemForm({...itemForm, customPrice: e.target.value})} placeholder="Default" min="0" />
+              </div>
+              <div style={{ width: 80 }}>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>DISC %</div>
+                <input type="number" value={itemForm.discountPct} onChange={e => setItemForm({...itemForm, discountPct: e.target.value})} placeholder="0" min="0" max="100" />
+              </div>
+              <Btn small onClick={addItem} disabled={!itemForm.productId}>Add</Btn>
+            </div>
+          </div>
+
+          {/* Items Table */}
           {newOrder.items.length > 0 && (
             <div style={{ background: T.surface, borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
               <table>
-                <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Disc</th><th>Total</th><th></th></tr></thead>
+                <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Disc</th><th>Total</th><th></th></tr></thead>
                 <tbody>
                   {newOrder.items.map((item, i) => (
                     <tr key={i}>
                       <td>{item.name}</td>
                       <td style={{ fontFamily: T.mono }}>{item.qty}</td>
-                      <td style={{ fontFamily: T.mono }}>
-                        {item.discountPct > 0 && <span style={{ textDecoration: "line-through", color: T.muted, fontSize: 11, marginRight: 4 }}>{fmt(item.originalPrice || item.price)}</span>}
-                        {fmt(item.price)}
-                      </td>
-                      <td style={{ fontFamily: T.mono, color: T.yellow }}>{item.discountPct > 0 ? `${item.discountPct}%` : "—"}</td>
+                      <td style={{ fontFamily: T.mono }}>{fmt(item.price)}</td>
+                      <td style={{ color: T.yellow }}>{item.discountPct > 0 ? `${item.discountPct}%` : "—"}</td>
                       <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(item.qty * item.price)}</td>
-                      <td><button onClick={() => setNewOrder({ ...newOrder, items: newOrder.items.filter((_, j) => j !== i) })} style={{ background: T.red+"22", border: `1px solid ${T.red}44`, borderRadius: 4, padding: "2px 8px", color: T.red, fontSize: 11, cursor: "pointer" }}>✕</button></td>
+                      <td><button onClick={() => setNewOrder({...newOrder, items: newOrder.items.filter((_,j)=>j!==i)})} style={{ background: T.red+"22", border: "none", borderRadius: 4, padding: "2px 8px", color: T.red, cursor: "pointer" }}>✕</button></td>
                     </tr>
                   ))}
                   <tr>
                     <td colSpan={4} style={{ textAlign: "right", fontWeight: 700 }}>Total</td>
-                    <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.accent }}>{fmt(newOrder.items.reduce((s, i) => s + i.qty * i.price, 0))}</td>
+                    <td style={{ fontFamily: T.mono, fontWeight: 800, color: T.accent }}>{fmt(orderTotal)}</td>
                     <td></td>
                   </tr>
                 </tbody>
               </table>
             </div>
           )}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+
+          <div style={{ display: "flex", gap: 10 }}>
             <Btn onClick={saveOrder} loading={saving} disabled={!newOrder.customer || !newOrder.location_id || newOrder.items.length === 0}>Save Order</Btn>
-            <Btn outline onClick={() => setShowCreate(false)}>Cancel</Btn>
+            <Btn outline onClick={() => { setShowCreate(false); setNewOrder({ type:"sell", location_id:"", customer:"", client_id:"", supplier_id:"", date:new Date().toISOString().slice(0,10), notes:"", items:[], reserveStock:false }); }}>Cancel</Btn>
           </div>
         </div>
       )}
 
+      {/* Orders List */}
       {loading ? <Loader /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {orders.length === 0 && (
-            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 40, textAlign: "center", color: T.muted }}>
-              No sales orders yet. Create your first one!
-            </div>
-          )}
+          {orders.length === 0 && <div style={{ textAlign: "center", padding: 40, color: T.muted }}>No orders yet</div>}
           {orders.map(order => (
-            <div key={order.id} style={{ background: T.card, border: `1px solid ${order.status === "confirmed" ? T.yellow + "44" : T.border}`, borderRadius: 12, padding: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+            <div key={order.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", borderBottom: `1px solid ${T.border}`, flexWrap: "wrap", gap: 10 }}>
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontFamily: T.mono, color: T.accent, fontSize: 13 }}>{order.id}</span>
-                    <Badge color={statusColor[order.status]}>{order.status.toUpperCase()}</Badge>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontFamily: T.mono, color: T.accent, fontSize: 13, fontWeight: 700 }}>{order.id}</span>
+                    <Badge color={order.type==="buy" ? T.yellow : T.green}>{order.type==="buy" ? "PURCHASE" : "SALE"}</Badge>
+                    <Badge color={statusColor[order.status]}>{order.status?.toUpperCase()}</Badge>
+                    {order.reserve_stock && <Badge color={T.yellow}>📦 RESERVED</Badge>}
                   </div>
-                  <div style={{ fontSize: 15, fontWeight: 700 }}>{order.customer}</div>
-                  <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{order.locationName} · {order.date}</div>
-                  {order.notes && <div style={{ fontSize: 12, color: T.muted, marginTop: 4, fontStyle: "italic" }}>{order.notes}</div>}
+                  <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{order.customer} • {order.locationName} • {order.date}</div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: T.accent, fontFamily: T.mono }}>{fmt(order.total)}</div>
-                  <div style={{ fontSize: 12, color: T.muted }}>{order.items.length} items</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: T.mono, fontWeight: 800, fontSize: 16, color: T.accent }}>{fmt(order.total)}</span>
+                  {order.status === "draft" && <Btn small onClick={() => updateStatus(order.id, "confirmed")} color={T.yellow}>✓ Confirm</Btn>}
+                  {(order.status === "draft" || order.status === "confirmed") && (
+                    <Btn small onClick={() => convertToInvoice(order)} loading={converting === order.id} color={T.green}>⚡ Invoice</Btn>
+                  )}
+                  {order.status !== "invoiced" && order.status !== "cancelled" && (
+                    <button onClick={() => cancelOrder(order)} style={{ background: T.red+"22", border:`1px solid ${T.red}44`, borderRadius:8, padding:"6px 12px", color:T.red, fontSize:12, cursor:"pointer" }}>✕ Cancel</button>
+                  )}
                 </div>
               </div>
-
-              {/* Items */}
-              <div style={{ background: T.surface, borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
-                <table>
-                  <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
-                  <tbody>
-                    {order.items.map((item, i) => (
-                      <tr key={i}>
-                        <td style={{ fontSize: 13 }}>{item.product_name}</td>
-                        <td style={{ fontFamily: T.mono }}>{item.quantity}</td>
-                        <td style={{ fontFamily: T.mono }}>{fmt(item.price)}</td>
-                        <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(item.quantity * item.price)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Actions */}
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {order.status === "draft" && (
-                  <Btn small onClick={() => updateStatus(order.id, "confirmed")} color={T.yellow}>✓ Confirm Order</Btn>
-                )}
-                {order.status === "confirmed" && (
-                  <Btn small onClick={() => convertToInvoice(order)} loading={converting === order.id} color={T.green}>⚡ Convert to Invoice</Btn>
-                )}
-                {order.status === "draft" && (
-                  <Btn small outline onClick={() => updateStatus(order.id, "cancelled")} color={T.red}>✕ Cancel</Btn>
-                )}
-                {(order.status === "draft" || order.status === "cancelled") && (
-                  <button onClick={async () => { if(window.confirm("Delete this order permanently?")) { await supabase.from("sales_order_items").delete().eq("order_id", order.id); await supabase.from("sales_orders").delete().eq("id", order.id); loadOrders(); }}} style={{ background:T.red+"22", border:`1px solid ${T.red}44`, borderRadius:6, padding:"6px 12px", color:T.red, fontSize:12, cursor:"pointer" }}>🗑️ Delete</button>
-                )}
-                {order.status === "invoiced" && (
-                  <span style={{ fontSize: 12, color: T.green, fontFamily: T.mono }}>✓ Invoice created successfully</span>
-                )}
-              </div>
+              {order.items.length > 0 && (
+                <div style={{ padding: "0" }}>
+                  <table>
+                    <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {order.items.map((item, i) => (
+                        <tr key={i}>
+                          <td>{item.product_name}</td>
+                          <td style={{ fontFamily: T.mono }}>{item.quantity}</td>
+                          <td style={{ fontFamily: T.mono }}>{fmt(item.price)}</td>
+                          <td style={{ fontFamily: T.mono, color: T.green }}>{fmt(item.quantity * item.price)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -2310,6 +2390,7 @@ function SalesOrders({ products, locations, invoices, setInvoices, onRefresh }) 
     </div>
   );
 }
+
 
 // ─── LOCATIONS MANAGEMENT ────────────────────────────────────────────────────
 function LocationsManagement({ locations, onRefresh, userProfile }) {
@@ -4546,7 +4627,7 @@ export default function App() {
               {page === "shipping-balance" && <ShippingBalance suppliers={suppliers} invoices={invoices} onRefresh={loadData} />}
               {page === "receipts" && <ReceiptsPage clients={clients} />}
               {page === "payments" && <PaymentsPage suppliers={suppliers} />}
-              {page === "orders" && <SalesOrders products={products} locations={locations} invoices={invoices} setInvoices={setInvoices} onRefresh={loadData} />}
+              {page === "orders" && <SalesOrders products={products} locations={locations} invoices={invoices} setInvoices={setInvoices} onRefresh={loadData} clients={clients} suppliers={suppliers} />}
               {page === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} products={products} locations={locations} clients={clients} suppliers={suppliers} onRefresh={loadData} userProfile={userProfile} />}
               {page === "expenses" && <ExpensesPage locations={locations} onRefresh={loadData} />}
               {page === "pl" && <ProfitLoss invoices={invoices} locations={locations} userProfile={userProfile} />}
