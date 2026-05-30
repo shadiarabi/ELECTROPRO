@@ -893,7 +893,11 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const saveEdit = async () => {
     if (!editInv) return;
     setSaving(true);
-    const amountPaid = editInv.payment_status === "paid" ? editInv.total : editInv.payment_status === "partial" ? (+editInv.amount_paid || 0) : 0;
+    const amountPaid = editInv.payment_status === "paid"
+      ? editInv.total
+      : editInv.payment_status === "partial"
+        ? Math.min(+editInv.amount_paid || 0, editInv.total)
+        : 0;
     await supabase.from("invoices").update({
       customer: editInv.customer,
       date: editInv.date,
@@ -959,8 +963,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
               {editInv.payment_status === "partial" && (
                 <div style={{ marginTop:10 }}>
                   <div style={{ fontSize:11, color:T.muted, marginBottom:4, textTransform:"uppercase" }}>Amount Paid ($)</div>
-                  <input type="number" value={editInv.amount_paid || ""} onChange={e => setEditInv({...editInv, amount_paid:e.target.value})} placeholder="0.00" style={{ maxWidth:200 }} />
-                  <div style={{ fontSize:12, color:T.yellow, marginTop:4, fontFamily:T.mono }}>Remaining: {fmt(editInv.total - (+editInv.amount_paid || 0))}</div>
+                  <input type="number" value={editInv.amount_paid ?? ""} onChange={e => setEditInv({...editInv, amount_paid:e.target.value})} placeholder="0.00" style={{ maxWidth:200 }} min="0" max={editInv.total} />
+                  <div style={{ fontSize:12, color:T.yellow, marginTop:4, fontFamily:T.mono }}>Remaining: {fmt(Math.max(0, editInv.total - (+editInv.amount_paid || 0)))}</div>
                 </div>
               )}
             </div>
@@ -1322,7 +1326,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
                     <td className="hide-mobile">
                       {pm ? <Badge color={pm==="cash_usd"?T.green:pm==="wallet_usdt"?T.accent:T.yellow}>{pm==="cash_usd"?"💵 Cash":pm==="wallet_usdt"?"💎 USDT":"🏦 Bank"}</Badge> : <span style={{ color:T.muted, fontSize:12 }}>—</span>}
                     </td>
-                    <td><button onClick={() => setEditInv({ ...inv, payment_status: inv.payment_status || inv.status || "paid", payment_method: inv.payment_method || "cash_usd" })} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 10px", color:T.accent, fontSize:12, cursor:"pointer" }}>✏️</button></td>
+                    <td><button onClick={() => setEditInv({ ...inv, payment_status: inv.payment_status || "pending", amount_paid: inv.amount_paid || 0, payment_method: inv.payment_method || "cash_usd" })} style={{ background:T.accent+"22", border:`1px solid ${T.accent}44`, borderRadius:6, padding:"4px 10px", color:T.accent, fontSize:12, cursor:"pointer" }}>✏️</button></td>
                     <td><button onClick={() => handlePrint(inv)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 12, cursor: "pointer" }}>🖨️</button></td>
                     <td><button onClick={async () => {
                       if(window.confirm(`Delete this ${inv.type === "sell" ? "sale" : "purchase"} invoice? Stock will be reversed automatically.`)) {
