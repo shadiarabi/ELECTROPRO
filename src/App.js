@@ -450,7 +450,7 @@ function Dashboard({ invoices, products, locations, userProfile, setPage }) {
       </div>
       {canSeeFinancials && pendingRevenue > 0 && (
         <div style={{ background: T.yellow+"11", border: `1px solid ${T.yellow}44`, borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 13, color: T.yellow }}>⏳ You have <strong>{sellsPending.length} unpaid invoice{sellsPending.length > 1 ? "s" : ""}</strong> worth <strong>{fmt(pendingRevenue)}</strong> pending collection.</span>
+          <span style={{ fontSize: 13, color: T.yellow }}>⏳ You have <strong>{sells.length - paidSells.length} unpaid invoice{sells.length - paidSells.length > 1 ? "s" : ""}</strong> worth <strong>{fmt(pendingRevenue)}</strong> pending collection.</span>
         </div>
       )}
       {canSeeFinancials && (
@@ -3885,7 +3885,7 @@ export default function App() {
       return { ...inv, total, cogs, profit, locationName: inv.locations?.name || "", invoice_items: undefined, locations: undefined };
     });
     const locsWithRevenue = locsData.map(l => {
-      const locSells = invsData.filter(i => i.location_id === l.id && i.type === "sell" && i.status === "paid");
+      const locSells = invsData.filter(i => i.location_id === l.id && i.type === "sell");
       const locPending = invsData.filter(i => i.location_id === l.id && i.type === "sell" && i.status !== "paid");
       return { ...l, revenue: locSells.reduce((s, i) => s + i.total, 0), pendingRevenue: locPending.reduce((s, i) => s + i.total, 0) };
     });
