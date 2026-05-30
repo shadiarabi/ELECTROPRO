@@ -917,19 +917,13 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         }
       }
 
-      // Auto-record supplier payment when purchase invoice is paid or partial
+      // Auto-record supplier PAYMENT only (invoice already shows as debit in ledger)
+      // Only insert a payment record — no charge needed since invoices are debits
       if (newInv.type === "buy" && newInv.supplier_id && newInv.paymentStatus !== "pending") {
-        const supplierAmountPaid = newInv.paymentStatus === "paid" ? grandTotal - shipmentAmt : (+newInv.amountPaid || 0);
+        const supplierAmountPaid = newInv.paymentStatus === "paid"
+          ? grandTotal - shipmentAmt
+          : (+newInv.amountPaid || 0);
         if (supplierAmountPaid > 0) {
-          // Add charge (invoice total minus shipment)
-          await supabase.from("supplier_payments").insert({
-            supplier_id: +newInv.supplier_id,
-            date: newInv.date,
-            amount: grandTotal - shipmentAmt,
-            type: "charge",
-            notes: `Invoice ${invId}`,
-          });
-          // Add payment made
           await supabase.from("supplier_payments").insert({
             supplier_id: +newInv.supplier_id,
             date: newInv.date,
@@ -939,15 +933,6 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             payment_method: newInv.paymentMethod || null,
           });
         }
-      } else if (newInv.type === "buy" && newInv.supplier_id && newInv.paymentStatus === "pending") {
-        // Just record the charge — no payment yet
-        await supabase.from("supplier_payments").insert({
-          supplier_id: +newInv.supplier_id,
-          date: newInv.date,
-          amount: grandTotal - shipmentAmt,
-          type: "charge",
-          notes: `Invoice ${invId}`,
-        });
       }
 
       setShowCreate(false);
