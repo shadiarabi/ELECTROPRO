@@ -825,6 +825,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
   const [editInv, setEditInv] = useState(null);
   const [newInv, setNewInv] = useState({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, shipmentCompany: "", shipmentPaymentStatus: "pending", shipmentPaymentMethod: "cash_usd", paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
   const [itemForm, setItemForm] = useState({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
+  const [productInfo, setProductInfo] = useState(null); // { stockByLocation, costBySupplier }
 
   const filtered = filterByDate(invoices, datePeriod)
     .filter(i => typeFilter === "all" || i.type === typeFilter)
@@ -839,6 +840,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
     const finalPrice = price * (1 - discPct / 100);
     setNewInv({ ...newInv, items: [...newInv.items, { productId: prod.id, name: prod.name, qty: +itemForm.qty, price: finalPrice, originalPrice: price, discountPct: discPct, cost: prod.cost_price }] });
     setItemForm({ productId: "", qty: 1, customPrice: "", discountPct: 0 });
+    setProductInfo(null);
   };
 
   const removeItem = (idx) => setNewInv({ ...newInv, items: newInv.items.filter((_, i) => i !== idx) });
@@ -1184,9 +1186,35 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             <div style={{ display: "grid", gridTemplateColumns: "2fr 60px 100px 80px auto", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
               <div>
                 <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>PRODUCT</div>
-                <select value={itemForm.productId} onChange={e => {
+                <select value={itemForm.productId} onChange={async e => {
                   const prod = products.find(p => p.id === +e.target.value);
                   setItemForm({ ...itemForm, productId: e.target.value, customPrice: prod ? (newInv.type === "sell" ? prod.sell_price : prod.cost_price) : "" });
+                  if (prod) {
+                    // Fetch stock per location
+                    const { data: stockData } = await supabase.from("stock").select("quantity, location_id").eq("product_id", prod.id);
+                    // Fetch last purchase cost per supplier from invoice_items
+                    const { data: invItems } = await supabase.from("invoice_items").select("price, invoice_id").eq("product_id", prod.id).order("invoice_id", { ascending: false });
+                    const { data: invs } = await supabase.from("invoices").select("id, supplier_id, date, shipment_value, shipment_type").eq("type", "buy").order("date", { ascending: false });
+                    const { data: supps } = await supabase.from("suppliers").select("id, name");
+                    const invMap = {}; (invs||[]).forEach(inv => { invMap[inv.id] = inv; });
+                    const suppMap = {}; (supps||[]).forEach(s => { suppMap[s.id] = s.name; });
+                    // Get cost per supplier (latest invoice per supplier)
+                    const costBySupplier = {};
+                    (invItems||[]).forEach(ii => {
+                      const inv = invMap[ii.invoice_id];
+                      if (!inv || !inv.supplier_id) return;
+                      if (!costBySupplier[inv.supplier_id]) {
+                        const invItemsForInv = (invItems||[]).filter(x => x.invoice_id === ii.invoice_id);
+                        const invSubtotal = invItemsForInv.reduce((s,x) => s + x.price, 0);
+                        const shipAmt = inv.shipment_type === "pct" ? invSubtotal * (inv.shipment_value||0)/100 : (inv.shipment_value||0);
+                        const shipPerUnit = invItemsForInv.length > 0 ? shipAmt / invItemsForInv.length : 0;
+                        costBySupplier[inv.supplier_id] = { cost: ii.price + shipPerUnit, date: inv.date, name: suppMap[inv.supplier_id] || "Unknown" };
+                      }
+                    });
+                    setProductInfo({ stockData: stockData||[], costBySupplier, prod });
+                  } else {
+                    setProductInfo(null);
+                  }
                 }}>
                   <option value="">Select product...</option>
                   {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
@@ -1206,6 +1234,57 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
               </div>
               <Btn small onClick={addItem} disabled={!itemForm.productId}>Add</Btn>
             </div>
+
+            {/* Product stock and cost info panel */}
+            {productInfo && newInv.type === "sell" && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                {/* Stock by location */}
+                <div style={{ background: T.surface, borderRadius: 10, padding: 14, border: `1px solid ${T.border}` }}>
+                  <div style={{ fontSize: 11, color: T.accent, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>📦 Stock by Location</div>
+                  {productInfo.stockData.filter(s => s.quantity > 0).map(s => {
+                    const loc = locations.find(l => l.id === s.location_id);
+                    return (
+                      <div key={s.location_id} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${T.border}`, fontSize: 13 }}>
+                        <span style={{ color: T.muted }}>{loc?.name || "Unknown"}</span>
+                        <span style={{ fontFamily: T.mono, fontWeight: 700, color: s.quantity > 10 ? T.green : s.quantity > 0 ? T.yellow : T.red }}>{s.quantity} pcs</span>
+                      </div>
+                    );
+                  })}
+                  {productInfo.stockData.filter(s => s.quantity > 0).length === 0 && (
+                    <div style={{ fontSize: 12, color: T.red }}>⚠️ No stock available</div>
+                  )}
+                  <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700 }}>
+                    <span>Total</span>
+                    <span style={{ fontFamily: T.mono, color: T.accent }}>{productInfo.stockData.reduce((s, x) => s + x.quantity, 0)} pcs</span>
+                  </div>
+                </div>
+
+                {/* Cost by supplier */}
+                <div style={{ background: T.surface, borderRadius: 10, padding: 14, border: `1px solid ${T.border}` }}>
+                  <div style={{ fontSize: 11, color: T.yellow, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>💰 Cost by Supplier</div>
+                  {Object.values(productInfo.costBySupplier).map((s, i) => {
+                    const margin = itemForm.customPrice > 0 ? (((+itemForm.customPrice - s.cost) / +itemForm.customPrice) * 100).toFixed(1) : null;
+                    return (
+                      <div key={i} style={{ padding: "5px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: T.muted }}>{s.name}</span>
+                          <span style={{ fontFamily: T.mono, fontWeight: 700, color: T.yellow }}>{fmt(s.cost)}</span>
+                        </div>
+                        {margin && (
+                          <div style={{ fontSize: 11, color: +margin > 20 ? T.green : +margin > 0 ? T.yellow : T.red, textAlign: "right" }}>
+                            Margin: {margin}%
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10, color: T.muted }}>Last purchase: {s.date}</div>
+                      </div>
+                    );
+                  })}
+                  {Object.keys(productInfo.costBySupplier).length === 0 && (
+                    <div style={{ fontSize: 12, color: T.muted }}>No purchase history</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {newInv.items.length > 0 && (
