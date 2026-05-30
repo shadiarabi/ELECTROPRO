@@ -1,13 +1,59 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 
-// ─── Theme ────────────────────────────────────────────────────────────────────
-const T = {
-  bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3e",
-  accent: "#00e5ff", accentDim: "#00e5ff22", green: "#00ff9d",
-  red: "#ff4466", yellow: "#ffcc00", text: "#e8e8f0", muted: "#6b6b8a",
-  font: "'Syne', sans-serif", mono: "'DM Mono', monospace",
+// ─── Themes ───────────────────────────────────────────────────────────────────
+const THEMES = {
+  cyan: {
+    name: "Cyber Cyan", icon: "🔵",
+    bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3e",
+    accent: "#00e5ff", accentDim: "#00e5ff22", green: "#00ff9d",
+    red: "#ff4466", yellow: "#ffcc00", text: "#e8e8f0", muted: "#6b6b8a",
+  },
+  purple: {
+    name: "Purple Galaxy", icon: "🟣",
+    bg: "#0a0a12", surface: "#12121f", card: "#1a1a2e", border: "#2d2b4e",
+    accent: "#a855f7", accentDim: "#a855f722", green: "#22c55e",
+    red: "#f43f5e", yellow: "#eab308", text: "#e8e8f0", muted: "#6b6b8a",
+  },
+  orange: {
+    name: "Orange Fire", icon: "🟠",
+    bg: "#0f0a05", surface: "#1a1208", card: "#241a0d", border: "#3d2e15",
+    accent: "#f97316", accentDim: "#f9731622", green: "#22c55e",
+    red: "#ef4444", yellow: "#eab308", text: "#f0ece8", muted: "#8a7a6b",
+  },
+  blue: {
+    name: "Electric Blue", icon: "💙",
+    bg: "#050a14", surface: "#0a1220", card: "#0f1a2e", border: "#1e3050",
+    accent: "#3b82f6", accentDim: "#3b82f622", green: "#10b981",
+    red: "#ef4444", yellow: "#f59e0b", text: "#e8eef0", muted: "#6b7a8a",
+  },
+  green: {
+    name: "Matrix Green", icon: "💚",
+    bg: "#050f08", surface: "#091510", card: "#0f1f14", border: "#1a3a20",
+    accent: "#22c55e", accentDim: "#22c55e22", green: "#4ade80",
+    red: "#f43f5e", yellow: "#eab308", text: "#e8f0ea", muted: "#6b8a70",
+  },
+  rose: {
+    name: "Rose Gold", icon: "🌸",
+    bg: "#0f080a", surface: "#1a0e12", card: "#26141a", border: "#3e1f28",
+    accent: "#f43f5e", accentDim: "#f43f5e22", green: "#22c55e",
+    red: "#ef4444", yellow: "#f59e0b", text: "#f0e8ea", muted: "#8a6b70",
+  },
+  gold: {
+    name: "Royal Gold", icon: "👑",
+    bg: "#0a0900", surface: "#151200", card: "#1e1a00", border: "#3a3000",
+    accent: "#fbbf24", accentDim: "#fbbf2422", green: "#22c55e",
+    red: "#ef4444", yellow: "#f59e0b", text: "#f0ede8", muted: "#8a826b",
+  },
 };
+
+const getTheme = () => {
+  const saved = localStorage.getItem("electropro_theme") || "cyan";
+  const base = THEMES[saved] || THEMES.cyan;
+  return { ...base, font: "'Syne', sans-serif", mono: "'DM Mono', monospace" };
+};
+
+let T = getTheme();
 
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap');
@@ -91,6 +137,36 @@ const filterByDate = (items, period, dateKey = "date") => {
     if (period === "this_year") return d.getFullYear()===now.getFullYear();
     return true;
   });
+};
+
+// ─── THEME SWITCHER ──────────────────────────────────────────────────────────
+const ThemeSwitcher = ({ onThemeChange }) => {
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState(localStorage.getItem("electropro_theme") || "cyan");
+  const select = (key) => {
+    localStorage.setItem("electropro_theme", key);
+    setCurrent(key);
+    setOpen(false);
+    onThemeChange();
+  };
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={() => setOpen(!open)} style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 12px", color: T.muted, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+        {THEMES[current]?.icon} Theme
+      </button>
+      {open && (
+        <div style={{ position: "absolute", bottom: "110%", left: 0, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 8, zIndex: 1000, minWidth: 180, boxShadow: "0 8px 32px #0008" }}>
+          {Object.entries(THEMES).map(([key, theme]) => (
+            <button key={key} onClick={() => select(key)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 12px", background: current===key ? theme.accent+"22" : "transparent", border: "none", borderRadius: 8, color: current===key ? theme.accent : T.text, fontSize: 13, fontWeight: current===key ? 700 : 400, cursor: "pointer", marginBottom: 2 }}>
+              <span style={{ width: 12, height: 12, borderRadius: "50%", background: theme.accent, display: "inline-block", flexShrink: 0 }} />
+              {theme.icon} {theme.name}
+              {current===key && <span style={{ marginLeft: "auto", fontSize: 10 }}>✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const Btn = ({ children, onClick, color = T.accent, outline, small, disabled, loading }) => (
@@ -4277,6 +4353,8 @@ export default function App() {
   const [pageHistory, setPageHistory] = useState(["dashboard"]);
   const page = pageHistory[pageHistory.length - 1];
   const [loading, setLoading] = useState(true);
+  const [, forceUpdate] = useState(0);
+  const handleThemeChange = () => { T = getTheme(); forceUpdate(n => n + 1); };
 
   const setPage = (newPage) => setPageHistory(prev => [...prev, newPage]);
   const goBack = () => setPageHistory(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
@@ -4435,6 +4513,7 @@ export default function App() {
           <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 12, color: T.text, fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="nav-label">{userProfile?.full_name}</div>
             <div className="nav-label" style={{ marginBottom: 10 }}><Badge color={isAdmin ? T.red : isManager ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></div>
+            <ThemeSwitcher onThemeChange={handleThemeChange} />
             <button onClick={handleLogout} className="nav-label" style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 10px", color: T.muted, fontSize: 11, width: "100%", cursor: "pointer" }}>Sign Out</button>
           </div>
         </nav>
