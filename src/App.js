@@ -2805,12 +2805,37 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
   const [payments, setPayments] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [editPayment, setEditPayment] = useState(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), amount: "", type: "payment", notes: "" });
 
   const reloadPayments = async () => {
     const { data } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected).order("date", { ascending: false });
     setPayments(data || []);
+  };
+
+  const syncPayments = async () => {
+    if (!selected) return;
+    setSyncing(true);
+    // Get all payments from payments table for this supplier
+    const { data: paymentsData } = await supabase.from("payments").select("*").eq("supplier_id", selected);
+    // Get all existing supplier_payments for this supplier
+    const { data: existingData } = await supabase.from("supplier_payments").select("*").eq("supplier_id", selected);
+    const existing = existingData || [];
+    // Find payments not yet in supplier_payments (match by date + amount)
+    for (const p of (paymentsData || [])) {
+      const alreadyExists = existing.some(e => e.type === "payment" && +e.amount === +p.amount && e.date === p.date);
+      if (!alreadyExists) {
+        await supabase.from("supplier_payments").insert({
+          supplier_id: selected, date: p.date, amount: +p.amount,
+          type: "payment", notes: p.notes || null, payment_method: p.payment_method || null,
+        });
+      }
+    }
+    await reloadPayments();
+    await refreshInvoices();
+    setSyncing(false);
+    alert("✅ Payments synced!");
   };
 
   useEffect(() => {
@@ -2971,6 +2996,7 @@ function SupplierBalance({ suppliers, invoices, onRefresh }) {
             <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width: "auto" }} />
             <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", color: T.muted, fontSize: 11, cursor: "pointer" }}>Clear</button>
             <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button onClick={syncPayments} disabled={syncing} style={{ background: T.yellow+"22", border: `1px solid ${T.yellow}44`, borderRadius: 8, padding: "6px 14px", color: T.yellow, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{syncing ? "⏳ Syncing..." : "🔄 Sync Payments"}</button>
               <button onClick={printSupplierLedger} style={{ background: T.green+"22", border: `1px solid ${T.green}44`, borderRadius: 8, padding: "6px 14px", color: T.green, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🖨️ Print Ledger</button>
               <Btn small onClick={() => setShowAdd(!showAdd)}>+ Record Payment</Btn>
             </div>
@@ -3418,6 +3444,11 @@ function PaymentsPage({ suppliers }) {
     if (!editPayment) return;
     setSaving(true);
     await supabase.from("payments").update({ date: editPayment.date, amount: +editPayment.amount, payment_method: editPayment.payment_method, reference: editPayment.reference, notes: editPayment.notes }).eq("id", editPayment.id);
+    // Also update supplier_payments if exists
+    const { data: spRows } = await supabase.from("supplier_payments").select("id").eq("supplier_id", editPayment.supplier_id).eq("type", "payment").eq("amount", editPayment.amount).limit(1);
+    if (spRows && spRows.length > 0) {
+      await supabase.from("supplier_payments").update({ date: editPayment.date, amount: +editPayment.amount, payment_method: editPayment.payment_method, notes: editPayment.notes }).eq("id", spRows[0].id);
+    }
     setEditPayment(null);
     load();
     setSaving(false);
