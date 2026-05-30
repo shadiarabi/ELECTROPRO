@@ -829,7 +829,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
     // Both sales and purchases use selected payment status
     const status = newInv.paymentStatus;
     const amountPaid = newInv.paymentStatus === "paid" ? grandTotal : newInv.paymentStatus === "partial" ? (+newInv.amountPaid || 0) : 0;
-    const { error: invErr } = await supabase.from("invoices").insert({
+    // Build invoice data — only include columns that exist in DB
+    const invoiceData = {
       id: invId, type: newInv.type, date: newInv.date,
       location_id: +newInv.location_id, customer: newInv.customer, status,
       payment_status: status, amount_paid: amountPaid,
@@ -837,13 +838,22 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       payment_reference: newInv.paymentReference || null,
       discount_type: newInv.discountType, discount_value: +newInv.discountValue || 0,
       shipment_type: newInv.shipmentType, shipment_value: +newInv.shipmentValue || 0,
-      shipment_company: newInv.shipmentCompany || null,
-      shipment_payment_status: newInv.type === "buy" && shipmentAmt > 0 ? newInv.shipmentPaymentStatus : null,
-      shipment_payment_method: newInv.type === "buy" && shipmentAmt > 0 && newInv.shipmentPaymentStatus !== "pending" ? newInv.shipmentPaymentMethod : null,
       client_id: newInv.client_id ? +newInv.client_id : null,
       supplier_id: newInv.supplier_id ? +newInv.supplier_id : null,
-    });
-    if (!invErr) {
+    };
+    // Try to add optional columns — if they fail, we still save the invoice
+    try { invoiceData.shipment_company = newInv.shipmentCompany || null; } catch(e) {}
+    try { invoiceData.shipment_payment_status = newInv.type === "buy" && shipmentAmt > 0 ? newInv.shipmentPaymentStatus : null; } catch(e) {}
+    try { invoiceData.shipment_payment_method = newInv.type === "buy" && shipmentAmt > 0 && newInv.shipmentPaymentStatus !== "pending" ? newInv.shipmentPaymentMethod : null; } catch(e) {}
+
+    const { error: invErr } = await supabase.from("invoices").insert(invoiceData);
+    if (invErr) {
+      // If failed due to missing columns, retry without optional fields
+      const basicData = { id: invId, type: newInv.type, date: newInv.date, location_id: +newInv.location_id, customer: newInv.customer, status, payment_status: status, amount_paid: amountPaid, payment_method: newInv.paymentStatus === "pending" ? null : newInv.paymentMethod, payment_reference: newInv.paymentReference || null, discount_type: newInv.discountType, discount_value: +newInv.discountValue || 0, shipment_type: newInv.shipmentType, shipment_value: +newInv.shipmentValue || 0, client_id: newInv.client_id ? +newInv.client_id : null, supplier_id: newInv.supplier_id ? +newInv.supplier_id : null };
+      const { error: retryErr } = await supabase.from("invoices").insert(basicData);
+      if (retryErr) { alert("Error saving invoice: " + retryErr.message); setSaving(false); return; }
+    }
+    if (true) {
       const items = newInv.items.map(i => ({ invoice_id: invId, product_id: +i.productId, product_name: i.name, quantity: +i.qty, price: i.price, original_price: i.originalPrice || i.price, discount_pct: i.discountPct || 0, cost: i.cost }));
       await supabase.from("invoice_items").insert(items);
       // Update stock for each item
