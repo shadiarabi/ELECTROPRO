@@ -422,11 +422,12 @@ function PrintInvoice({ inv, locations, onClose }) {
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function Dashboard({ invoices, products, locations, userProfile, setPage }) {
-  const sells = invoices.filter(i => i.type === "sell" && i.status === "paid");
-  const sellsPending = invoices.filter(i => i.type === "sell" && i.status !== "paid");
+  const sells = invoices.filter(i => i.type === "sell");
   const buys = invoices.filter(i => i.type === "buy" && i.status === "paid");
+  const paidSells = sells.filter(i => i.status === "paid");
   const revenue = sells.reduce((s, i) => s + i.total, 0);
-  const pendingRevenue = sellsPending.reduce((s, i) => s + i.total, 0);
+  const paidRevenue = paidSells.reduce((s, i) => s + i.total, 0);
+  const pendingRevenue = revenue - paidRevenue;
   const cogs = sells.reduce((s, i) => s + i.cogs, 0);
   const profit = revenue - cogs;
   const totalItems = products.reduce((s, p) => s + (p.totalStock || 0), 0);
@@ -441,8 +442,8 @@ function Dashboard({ invoices, products, locations, userProfile, setPage }) {
         <span style={{ marginLeft: 8 }}><Badge color={userProfile?.role === "admin" ? T.red : userProfile?.role === "manager" ? T.accent : T.green}>{(userProfile?.role || "cashier").toUpperCase()}</Badge></span>
       </p>
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
-        {canSeeFinancials && <StatCard label="Paid Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} paid sales`} onClick={() => setPage("invoices")} />}
-        {canSeeFinancials && <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sellsPending.length} pending`} onClick={() => setPage("invoices")} />}
+        {canSeeFinancials && <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} onClick={() => setPage("invoices")} />}
+        {canSeeFinancials && <StatCard label="Collected" value={fmt(paidRevenue)} icon="✅" color={T.accent} sub={`${paidSells.length} paid`} onClick={() => setPage("invoices")} />}
         {canSeeFinancials && <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit >= 0 ? T.green : T.red} sub={`${revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0}% margin`} onClick={() => setPage("pl")} />}
         {canSeeFinancials && <StatCard label="Purchases" value={fmt(buys.reduce((s, i) => s + i.total, 0))} icon="🛒" color={T.accent} sub={`${buys.length} invoices`} onClick={() => setPage("invoices")} />}
         <StatCard label="Stock Items" value={totalItems} icon="📦" color={T.accent} sub={`${products.length} products`} onClick={() => setPage("inventory")} />
@@ -471,8 +472,9 @@ function Dashboard({ invoices, products, locations, userProfile, setPage }) {
           <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 24 }}>
             <h3 style={{ fontSize: 13, letterSpacing: 2, textTransform: "uppercase", color: T.muted, marginBottom: 20 }}>P&L Summary</h3>
             {[
-              { label: "Paid Revenue", val: revenue, color: T.green },
-              { label: "Pending Revenue", val: pendingRevenue, color: T.yellow },
+              { label: "Total Revenue", val: revenue, color: T.green },
+              { label: "Collected", val: paidRevenue, color: T.accent },
+              { label: "Pending Collection", val: pendingRevenue, color: T.yellow },
               { label: "Cost of Goods Sold", val: -cogs, color: T.red },
               { label: "Gross Profit", val: revenue - cogs, color: T.accent, bold: true },
               { label: "Net Profit / Loss", val: profit, color: profit >= 0 ? T.green : T.red, bold: true },
@@ -1513,11 +1515,12 @@ function ProfitLoss({ invoices, locations, userProfile }) {
     if (period === "this_year") return d.getFullYear() === now.getFullYear();
     return true;
   });
-  const sells = filtered.filter(i => i.type === "sell" && i.status === "paid");
-  const sellsPending = filtered.filter(i => i.type === "sell" && i.status !== "paid");
-  const buys = filtered.filter(i => i.type === "buy" && i.status === "paid");
+  const sells = filtered.filter(i => i.type === "sell");
+  const buys = filtered.filter(i => i.type === "buy");
+  const paidSells = sells.filter(i => i.status === "paid");
   const revenue = sells.reduce((s, i) => s + i.total, 0);
-  const pendingRevenue = sellsPending.reduce((s, i) => s + i.total, 0);
+  const paidRevenue = paidSells.reduce((s, i) => s + i.total, 0);
+  const pendingRevenue = revenue - paidRevenue;
   const cogs = sells.reduce((s, i) => s + i.cogs, 0);
   const purchases = buys.reduce((s, i) => s + i.total, 0);
   const grossProfit = revenue - cogs;
@@ -2126,7 +2129,7 @@ function LocationsPage({ products, invoices, locations }) {
   useEffect(() => { if (locations.length && !selected) setSelected(locations[0].id); }, [locations]);
   const loc = locations.find(l => l.id === selected);
   const locInvoices = invoices.filter(i => i.location_id === selected);
-  const sells = locInvoices.filter(i => i.type === "sell" && i.status === "paid");
+  const sells = locInvoices.filter(i => i.type === "sell");
   const revenue = sells.reduce((s, i) => s + i.total, 0);
   const profit = sells.reduce((s, i) => s + i.profit, 0);
   const locProducts = products.map(p => ({ ...p, locStock: p.stockByLocation?.[selected] || 0 })).filter(p => p.locStock > 0);
@@ -2450,14 +2453,14 @@ function Reports({ invoices, products, locations, setPage }) {
     return true;
   });
 
-  const sells = filtered.filter(i => i.type==="sell" && (i.status==="paid" || i.status==="pending" || i.status==="partial"));
-  const buys = filtered.filter(i => i.type==="buy" && (i.status==="paid" || i.status==="pending" || i.status==="partial"));
+  const sells = filtered.filter(i => i.type==="sell");
+  const buys = filtered.filter(i => i.type==="buy");
   const paidSells = sells.filter(i => i.status==="paid");
   const revenue = sells.reduce((s,i)=>s+i.total,0);
   const paidRevenue = paidSells.reduce((s,i)=>s+i.total,0);
   const pendingRevenue = revenue - paidRevenue;
-  const cogs = paidSells.reduce((s,i)=>s+i.cogs,0);
-  const profit = paidRevenue - cogs;
+  const cogs = sells.reduce((s,i)=>s+i.cogs,0);
+  const profit = revenue - cogs;
 
   // Daily breakdown
   const daily = {};
@@ -2499,7 +2502,7 @@ function Reports({ invoices, products, locations, setPage }) {
 
       <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 16, marginBottom: 24 }}>
         <StatCard label="Total Revenue" value={fmt(revenue)} icon="💰" color={T.green} sub={`${sells.length} invoices`} onClick={() => setPage("invoices")} />
-        <StatCard label="Paid Revenue" value={fmt(paidRevenue)} icon="✅" color={T.green} sub={`${paidSells.length} paid`} onClick={() => setPage("invoices")} />
+        <StatCard label="Collected" value={fmt(paidRevenue)} icon="✅" color={T.accent} sub={`${paidSells.length} paid`} onClick={() => setPage("invoices")} />
         <StatCard label="Pending Revenue" value={fmt(pendingRevenue)} icon="⏳" color={T.yellow} sub={`${sells.length - paidSells.length} pending`} onClick={() => setPage("invoices")} />
         <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} onClick={() => setPage("pl")} />
         <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} onClick={() => setPage("invoices")} />
