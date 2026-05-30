@@ -876,6 +876,7 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
       }
 
       // Distribute shipment fees to product cost prices (purchase only)
+      // Uses item.price (purchase price on this invoice) NOT item.cost (which may already be inflated)
       if (newInv.type === "buy" && newInv.distributeShipment && shipmentAmt > 0) {
         const totalItemValue = newInv.items.reduce((s, i) => s + +i.qty * i.price, 0);
         if (totalItemValue > 0) {
@@ -883,7 +884,8 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
             const itemValue = +item.qty * item.price;
             const share = shipmentAmt * (itemValue / totalItemValue);
             const extraPerUnit = share / +item.qty;
-            const newCost = item.cost + extraPerUnit;
+            // Use item.price (this invoice's purchase price) as base — not item.cost
+            const newCost = +item.price + extraPerUnit;
             await supabase.from("products").update({ cost_price: +newCost.toFixed(4) }).eq("id", +item.productId);
           }));
         }
