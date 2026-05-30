@@ -917,6 +917,39 @@ function Invoices({ invoices, setInvoices, products, locations, clients, supplie
         }
       }
 
+      // Auto-record supplier payment when purchase invoice is paid or partial
+      if (newInv.type === "buy" && newInv.supplier_id && newInv.paymentStatus !== "pending") {
+        const supplierAmountPaid = newInv.paymentStatus === "paid" ? grandTotal - shipmentAmt : (+newInv.amountPaid || 0);
+        if (supplierAmountPaid > 0) {
+          // Add charge (invoice total minus shipment)
+          await supabase.from("supplier_payments").insert({
+            supplier_id: +newInv.supplier_id,
+            date: newInv.date,
+            amount: grandTotal - shipmentAmt,
+            type: "charge",
+            notes: `Invoice ${invId}`,
+          });
+          // Add payment made
+          await supabase.from("supplier_payments").insert({
+            supplier_id: +newInv.supplier_id,
+            date: newInv.date,
+            amount: supplierAmountPaid,
+            type: "payment",
+            notes: `Payment for invoice ${invId}`,
+            payment_method: newInv.paymentMethod || null,
+          });
+        }
+      } else if (newInv.type === "buy" && newInv.supplier_id && newInv.paymentStatus === "pending") {
+        // Just record the charge — no payment yet
+        await supabase.from("supplier_payments").insert({
+          supplier_id: +newInv.supplier_id,
+          date: newInv.date,
+          amount: grandTotal - shipmentAmt,
+          type: "charge",
+          notes: `Invoice ${invId}`,
+        });
+      }
+
       setShowCreate(false);
       setNewInv({ type: "sell", location_id: "", customer: "", client_id: "", supplier_id: "", date: new Date().toISOString().slice(0, 10), items: [], discountType: "fixed", discountValue: 0, shipmentType: "fixed", shipmentValue: 0, distributeShipment: false, shipmentCompany: "", shipmentPaymentStatus: "pending", shipmentPaymentMethod: "cash_usd", paymentStatus: "paid", amountPaid: "", paymentMethod: "cash_usd", paymentReference: "" });
       onRefresh();
