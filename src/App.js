@@ -2659,6 +2659,12 @@ function Reports({ invoices, products, locations, setPage }) {
   const cogs = sells.reduce((s,i)=>s+i.cogs,0);
   const profit = revenue - cogs;
 
+  // BSM Profit tracking
+  const bsmInvoices = filtered.filter(i => i.type === "buy" && (+i.partial_bsm || 0) > 0);
+  const bsmTotalProfit = bsmInvoices.reduce((s, i) => s + (+i.partial_bsm || 0), 0);
+  const bsmOnAccount = bsmInvoices.filter(i => i.bsm_profit_status === "on_account").reduce((s, i) => s + (+i.partial_bsm || 0), 0);
+  const bsmPending = bsmTotalProfit - bsmOnAccount;
+
   // Daily breakdown
   const daily = {};
   sells.forEach(inv => {
@@ -2704,6 +2710,9 @@ function Reports({ invoices, products, locations, setPage }) {
         <StatCard label="Net Profit" value={fmt(profit)} icon="📈" color={profit>=0?T.green:T.red} sub={`${paidRevenue>0?((profit/paidRevenue)*100).toFixed(1):0}% margin`} onClick={() => setPage("pl")} />
         <StatCard label="Purchases" value={fmt(buys.reduce((s,i)=>s+i.total,0))} icon="🛒" color={T.yellow} sub={`${buys.length} orders`} onClick={() => setPage("invoices")} />
         <StatCard label="Avg Sale" value={fmt(sells.length?revenue/sells.length:0)} icon="📊" color={T.accent} sub="per invoice" onClick={() => setPage("invoices")} />
+        <StatCard label="BSM Profit Total" value={fmt(bsmTotalProfit)} icon="🏦" color={T.green} sub={`${bsmInvoices.length} invoices`} />
+        <StatCard label="BSM On Account" value={fmt(bsmOnAccount)} icon="✅" color={T.accent} sub="credited" />
+        <StatCard label="BSM Pending" value={fmt(bsmPending)} icon="⏳" color={T.yellow} sub="not yet credited" />
       </div>
 
       <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -2776,6 +2785,44 @@ function Reports({ invoices, products, locations, setPage }) {
           </tbody>
         </table>
       </div>
+
+      {/* BSM Profit Section */}
+      {bsmInvoices.length > 0 && (
+        <div style={{ marginTop: 24, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: T.green }}>🏦 BSM Profit Tracker</h3>
+            <div style={{ display: "flex", gap: 16, fontFamily: T.mono, fontSize: 13 }}>
+              <span style={{ color: T.green }}>Total: {fmt(bsmTotalProfit)}</span>
+              <span style={{ color: T.accent }}>On Account: {fmt(bsmOnAccount)}</span>
+              <span style={{ color: T.yellow }}>Pending: {fmt(bsmPending)}</span>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Invoice</th><th>Date</th><th>Supplier</th>
+                <th style={{ color: T.green }}>BSM Profit</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bsmInvoices.map(inv => (
+                <tr key={inv.id}>
+                  <td style={{ fontFamily: T.mono, color: T.accent, fontSize: 12 }}>{inv.id}</td>
+                  <td style={{ fontSize: 12, color: T.muted }}>{inv.date}</td>
+                  <td style={{ fontWeight: 600 }}>{inv.customer}</td>
+                  <td style={{ fontFamily: T.mono, fontWeight: 700, color: T.green }}>{fmt(+inv.partial_bsm)}</td>
+                  <td>
+                    <Badge color={inv.bsm_profit_status === "on_account" ? T.green : T.yellow}>
+                      {inv.bsm_profit_status === "on_account" ? "✅ On Account" : "⏳ Pending"}
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
